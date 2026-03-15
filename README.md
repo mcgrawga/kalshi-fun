@@ -51,7 +51,6 @@ Edit [config.py](config.py) to tune the scanner to your preferences:
 | `MIN_EDGE` | `0.03` | Minimum edge (sharp prob − Kalshi prob) to flag a bet |
 | `BANKROLL` | `100.00` | Total bankroll in dollars for Kelly sizing |
 | `KELLY_FRACTION` | `0.25` | Fractional Kelly multiplier (0.25 = quarter Kelly) |
-| `POLL_INTERVAL_SECONDS` | `60` | Seconds between re-scans |
 | `MIN_VOLUME` | `0` | Minimum Kalshi market volume to consider |
 | `SHARP_BOOKS` | `["pinnacle", "betonlineag"]` | Pre-game books in priority order |
 | `LIVE_SHARP_BOOKS` | `["draftkings", "fanduel", "betonlineag"]` | Live books in priority order |

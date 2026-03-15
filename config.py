@@ -59,11 +59,6 @@ BANKROLL: float = 27.74
 # volatile. Quarter Kelly (0.25) is more conservative and widely recommended.
 KELLY_FRACTION: float = 0.25
 
-# ─── Polling ──────────────────────────────────────────────────────────────────
-# How often to re-scan in seconds. 60–120s is a good balance between freshness
-# and conserving The Odds API monthly quota.
-POLL_INTERVAL_SECONDS: int = 60
-
 # ─── Liquidity Filter ─────────────────────────────────────────────────────────
 # Minimum Kalshi market volume (contracts) to consider a market tradeable.
 # Set > 0 to avoid thinly-traded markets where fills at the displayed price are unlikely.
