@@ -241,3 +241,34 @@ class KalshiClient:
             body["no_price_dollars"] = price_str
 
         return self._post("/portfolio/orders", body)
+
+    # ─── Portfolio ────────────────────────────────────────────────────────────
+
+    def get_settlements(self, limit: int = 200) -> list[dict]:
+        """
+        Fetch all portfolio settlement records from Kalshi, paginating until complete.
+
+        Each record contains:
+            ticker         — Kalshi market ticker
+            market_result  — "yes", "no", or "void"
+            revenue        — gross payout in cents (integer)
+            fee_cost       — fees paid in dollars (string, e.g. "0.03")
+            settled_time   — ISO-8601 UTC settlement timestamp
+        """
+        settlements: list[dict] = []
+        cursor: Optional[str] = None
+
+        while True:
+            params: dict = {"limit": limit}
+            if cursor:
+                params["cursor"] = cursor
+
+            data = self._get("/portfolio/settlements", params=params)
+            batch: list[dict] = data.get("settlements", [])
+            settlements.extend(batch)
+
+            cursor = data.get("cursor")
+            if not cursor or not batch:
+                break
+
+        return settlements

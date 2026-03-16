@@ -166,6 +166,14 @@ def get_active_tickers(since_hours: int = 36) -> dict[str, str]:
     return {game_key(row["ticker"]): row["ticker"] for row in rows}
 
 
+def get_open_bets() -> list[sqlite3.Row]:
+    """Return all bets with fill_count > 0 that have not yet been settled."""
+    with _conn() as con:
+        return con.execute(
+            "SELECT * FROM bets WHERE outcome IS NULL AND fill_count > 0 ORDER BY placed_at ASC"
+        ).fetchall()
+
+
 def settle_bet(bet_id: int, outcome: str, pnl: float) -> None:
     """
     Update the outcome and P&L for a settled bet.

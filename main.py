@@ -28,6 +28,7 @@ from engine.analyzer import scan_all
 from alerts.notifier import print_opportunities, print_summary
 from models.market import KalshiMarket
 from db.bets import init_db, record_bet, get_active_tickers
+from engine.settler import settle_open_bets
 
 
 _TICKER_DATE_RE = re.compile(r'-(\d{2})([A-Z]{3})(\d{2})[A-Z]', re.IGNORECASE)
@@ -239,6 +240,8 @@ def main() -> None:
     kalshi = KalshiClient()
     odds = OddsClient()
 
+    settle_open_bets(kalshi)
+
     while True:
         already_bet: dict[str, str] = get_active_tickers()
         value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet)
@@ -249,7 +252,7 @@ def main() -> None:
 
         while True:
             try:
-                raw = input(f'  Enter game number(s) to bet (e.g. "1 3 5"), "r" to rescan, or "b" for bye: ').strip()
+                raw = input(f'  Enter game number(s) to bet (e.g. "1 3 5"), "s" to rescan, or "b" for bye: ').strip()
             except (EOFError, KeyboardInterrupt):
                 print("\n[Scanner] Stopped.")
                 return
@@ -258,7 +261,7 @@ def main() -> None:
                 print("  Goodbye!")
                 return
 
-            if raw.lower() in ("refresh", "r"):
+            if raw.lower() in ("rescan", "s"):
                 break  # re-run scan
 
             tokens = raw.split()
