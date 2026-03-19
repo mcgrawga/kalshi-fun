@@ -205,6 +205,9 @@ def _parse_args() -> argparse.Namespace:
             "  python main.py --auto-bet             scan and auto-bet qualifying games\n"
             "  python main.py --date tomorrow --auto-bet\n"
             "                                        auto-bet tomorrow's qualifying games\n"
+            "  python main.py --auto-bet-loop 60     auto-bet loop, rescan every 60s\n"
+            "  python main.py --date tomorrow --auto-bet-loop 120\n"
+            "                                        loop tomorrow's games every 120s\n"
             "\n"
             "interactive prompt (after scan):\n"
             "  1 3 5   place bets on games #1, #3, and #5\n"
@@ -222,7 +225,8 @@ def _parse_args() -> argparse.Namespace:
             "local timezone — there is no rolling time window."
         ),
     )
-    p.add_argument(
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument(
         "--auto-bet",
         action="store_true",
         default=False,
@@ -233,7 +237,20 @@ def _parse_args() -> argparse.Namespace:
             "The table and manual prompt still appear after auto-bets are placed."
         ),
     )
+    mode.add_argument(
+        "--auto-bet-loop",
+        type=int,
+        metavar="SECONDS",
+        default=None,
+        help=(
+            "Run in continuous unattended loop mode. Automatically places bets using the "
+            "same AUTO_BET_MIN_EDGE and AUTO_BET_MIN_KALSHI_PROB thresholds as --auto-bet, "
+            "then waits SECONDS before rescanning. No prompt is shown — a countdown "
+            "displays instead. Press Ctrl+C to stop. Cannot be combined with --auto-bet."
+        ),
+    )
     return p.parse_args()
+
 
 
 def _resolve_date(raw: str | None) -> date | None:
@@ -250,6 +267,18 @@ def _resolve_date(raw: str | None) -> date | None:
     except ValueError:
         print(f"[ERROR] --date must be 'today', 'tomorrow', or YYYY-MM-DD (got '{raw}')")
         sys.exit(1)
+
+
+def _countdown(seconds: int) -> None:
+    """Print a live countdown on a single overwriting line, then clear it."""
+    try:
+        for remaining in range(seconds, 0, -1):
+            print(f"  ⏱  Next scan in {remaining}s...  ", end="\r", flush=True)
+            time.sleep(1)
+        print(" " * 40, end="\r", flush=True)  # clear the line
+    except KeyboardInterrupt:
+        print(" " * 40, end="\r", flush=True)
+        raise
 
 
 def _place_bet(kalshi: KalshiClient, bet) -> None:
@@ -340,6 +369,8 @@ def main() -> None:
     print(f"║  Kelly mult   : {config.KELLY_FRACTION * 100:.0f}% (fractional)")
     if args.auto_bet:
         print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  Kalshi prob ≥ {config.AUTO_BET_MIN_KALSHI_PROB * 100:.0f}%)")
+    if args.auto_bet_loop is not None:
+        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  Kalshi prob ≥ {config.AUTO_BET_MIN_KALSHI_PROB * 100:.0f}%,  interval: {args.auto_bet_loop}s)")
     print("╚══════════════════════════════════════════════════════════\n")
 
     _validate_config()
@@ -348,27 +379,37 @@ def main() -> None:
     kalshi = KalshiClient()
     odds = OddsClient()
 
+    # In loop mode, auto_bet behaviour is always active
+    do_auto_bet = args.auto_bet or (args.auto_bet_loop is not None)
+
     while True:
         settle_open_bets(kalshi)
         already_bet: dict[str, str] = get_active_tickers()
-        value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=args.auto_bet)
+        value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet)
 
         # Auto-bet qualifying rows before showing the table
-        if args.auto_bet and value_bets:
+        if do_auto_bet and value_bets:
             n_placed = _auto_bet(kalshi, value_bets, already_bet)
             if n_placed:
                 time.sleep(1)
                 # Refresh so the table renders with green arrows on auto-bet rows
                 already_bet = get_active_tickers()
-                value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=args.auto_bet)
+                value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet)
 
+        # ── Loop mode: countdown then rescan, no prompt ────────────────────
+        if args.auto_bet_loop is not None:
+            if not value_bets:
+                print("  No value bets found.")
+            _countdown(args.auto_bet_loop)
+            continue
+
+        # ── Interactive mode ───────────────────────────────────────────────
         if not value_bets:
-            print("  No value bets found. Exiting.")
-            break
+            print("  No value bets found.")
 
         while True:
             try:
-                raw = input(f'  Enter game number(s) to bet (e.g. "1 3 5"), "r" to rescan, or "b" for bye: ').strip()
+                raw = input(f'  Enter "r" to rescan or "b" for bye: ').strip() if not value_bets else input(f'  Enter game number(s) to bet (e.g. "1 3 5"), "r" to rescan, or "b" for bye: ').strip()
             except (EOFError, KeyboardInterrupt):
                 print("\n[Scanner] Stopped.")
                 return

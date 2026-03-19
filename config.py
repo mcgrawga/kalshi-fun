@@ -66,7 +66,7 @@ KELLY_FRACTION: float = 0.25
 #   kalshi_implied_prob >= AUTO_BET_MIN_KALSHI_PROB (the "Kalshi Prob" column)
 # Games already in the bet ledger are always skipped.
 AUTO_BET_MIN_EDGE: float = 0.02
-AUTO_BET_MIN_KALSHI_PROB: float = 0.09
+AUTO_BET_MIN_KALSHI_PROB: float = 0.4
 
 # ─── Liquidity Filter ─────────────────────────────────────────────────────────
 # Minimum Kalshi market volume (contracts) to consider a market tradeable.
