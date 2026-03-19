@@ -540,6 +540,10 @@ TEAM_ALIASES: dict[str, str] = {
     "california baptist": "California Baptist",
     "cal baptist": "California Baptist",
     "cal baptist lancers": "California Baptist",
+    "california": "California Golden Bears",
+    "cal": "California Golden Bears",
+    "cal bears": "California Golden Bears",
+    "california golden bears": "California Golden Bears",
     "davidson": "Davidson",
     "delaware st": "Delaware St",
     "delaware state": "Delaware St",
@@ -622,6 +626,11 @@ TEAM_ALIASES: dict[str, str] = {
     "tulane green wave": "Tulane",
     "uc irvine": "UC Irvine",
     "uc irvine anteaters": "UC Irvine",
+    "uic": "UIC Flames",
+    "uic flames": "UIC Flames",
+    "illinois chicago": "UIC Flames",
+    "illinois-chicago": "UIC Flames",
+    "ui chicago": "UIC Flames",
     "uc san diego": "UC San Diego",
     "uc san diego tritons": "UC San Diego",
     "ucf": "UCF",
@@ -911,6 +920,7 @@ def canonicalize(name: str, sport: str = "") -> str:
             "florida": "Florida",              # Florida Gators (not NHL Panthers)
             "pittsburgh": "Pittsburgh",        # Pittsburgh Panthers (not NHL Penguins)
             "miami": "Miami FL",               # Miami Hurricanes (not NBA Heat)
+            "portland": "Portland",            # Portland Pilots (not NBA Trail Blazers)
         }
         if sport == "icehockey_nhl" and key in _NHL_OVERRIDES:
             return _NHL_OVERRIDES[key]

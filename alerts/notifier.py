@@ -11,7 +11,10 @@ _RESET  = "\033[0m"
 
 
 def _red(text: str) -> str:
-    return f"{_RED}{text}{_RESET}"
+    # Re-apply red after any embedded resets (e.g. green arrow tags) so they
+    # don't terminate the outer red wrapping early.
+    inner = text.replace(_RESET, _RESET + _RED)
+    return f"{_RED}{inner}{_RESET}"
 
 
 def _strike(text: str) -> str:

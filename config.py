@@ -53,11 +53,20 @@ KALSHI_SERIES: list[str] = ["KXNBAGAME", "KXNCAAMBGAME", "KXNCAAWBGAME", "KXNHLG
 MIN_EDGE: float = 0.001
 
 # ─── Bankroll & Sizing ───────────────────────────────────────────────────────
-BANKROLL: float = 25.73
+BANKROLL: float = 24.88
 
 # Fractional Kelly multiplier. Full Kelly (1.0) is mathematically optimal but
 # volatile. Quarter Kelly (0.25) is more conservative and widely recommended.
 KELLY_FRACTION: float = 0.25
+
+# ─── Auto-Bet Thresholds ─────────────────────────────────────────────────────
+# When --auto-bet is passed, bets are placed automatically on any value bet where
+# BOTH of the following conditions are met:
+#   edge             >= AUTO_BET_MIN_EDGE        (the "Edge" column in the table)
+#   kalshi_implied_prob >= AUTO_BET_MIN_KALSHI_PROB (the "Kalshi Prob" column)
+# Games already in the bet ledger are always skipped.
+AUTO_BET_MIN_EDGE: float = 0.02
+AUTO_BET_MIN_KALSHI_PROB: float = 0.09
 
 # ─── Liquidity Filter ─────────────────────────────────────────────────────────
 # Minimum Kalshi market volume (contracts) to consider a market tradeable.

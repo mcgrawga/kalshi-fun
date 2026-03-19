@@ -87,7 +87,7 @@ def _parse_kalshi_market(raw: dict) -> KalshiMarket:
     )
 
 
-def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = None, debug: bool = True, already_bet_tickers: dict[str, str] | None = None) -> list:
+def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = None, debug: bool = True, already_bet_tickers: dict[str, str] | None = None, auto_bet: bool = False) -> list:
     """Execute one full scan cycle. Returns the list of value bets found."""
     ts = datetime.now().strftime("%H:%M:%S")
     date_label = target_date.strftime("%a %b %-d") if target_date else "all upcoming"
@@ -168,6 +168,8 @@ def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = 
 
     # 7. Report
     print_summary(len(kalshi_markets), len(normalized_games), len(matched), len(value_bets))
+    if auto_bet:
+        print(f"  [Auto-Bet] ENABLED  |  min edge: {config.AUTO_BET_MIN_EDGE * 100:.1f}%  |  min Kalshi prob: {config.AUTO_BET_MIN_KALSHI_PROB * 100:.0f}%")
     print_opportunities(value_bets, already_bet_tickers=already_bet_tickers or {})
 
     return value_bets
@@ -188,13 +190,48 @@ def _validate_config() -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Kalshi Value Bet Scanner")
+    p = argparse.ArgumentParser(
+        description=(
+            "Kalshi Value Bet Scanner — finds mispriced moneyline markets on Kalshi\n"
+            "by comparing implied probabilities against vig-removed sharp sportsbook odds.\n"
+            "Thresholds and bankroll settings are configured in config.py."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  python main.py                        scan today's games\n"
+            "  python main.py --date tomorrow        scan tomorrow's games\n"
+            "  python main.py --date 2026-03-20      scan a specific date\n"
+            "  python main.py --auto-bet             scan and auto-bet qualifying games\n"
+            "  python main.py --date tomorrow --auto-bet\n"
+            "                                        auto-bet tomorrow's qualifying games\n"
+            "\n"
+            "interactive prompt (after scan):\n"
+            "  1 3 5   place bets on games #1, #3, and #5\n"
+            "  r       rescan (re-fetches odds and Kalshi prices)\n"
+            "  b       exit\n"
+        ),
+    )
     p.add_argument(
         "--date",
         metavar="DATE",
         default=None,
-        help="Filter games to this date: 'today', 'tomorrow', or YYYY-MM-DD. "
-             "Omit to scan all upcoming games.",
+        help=(
+            "Date to scan. Accepts 'today', 'tomorrow', or YYYY-MM-DD. "
+            "Defaults to today. Games are matched by exact calendar date in your "
+            "local timezone — there is no rolling time window."
+        ),
+    )
+    p.add_argument(
+        "--auto-bet",
+        action="store_true",
+        default=False,
+        help=(
+            "Automatically place bets on value bets where edge >= AUTO_BET_MIN_EDGE "
+            "and Kalshi implied prob >= AUTO_BET_MIN_KALSHI_PROB (both set in config.py). "
+            "Games already in the bet ledger are always skipped. "
+            "The table and manual prompt still appear after auto-bets are placed."
+        ),
     )
     return p.parse_args()
 
@@ -215,6 +252,75 @@ def _resolve_date(raw: str | None) -> date | None:
         sys.exit(1)
 
 
+def _place_bet(kalshi: KalshiClient, bet) -> None:
+    """Place a single order for `bet` and record it in the DB if filled."""
+    ask = bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask
+    print(f"  ⏳  Placing: Buy {bet.side} · {bet.yes_team} — {bet.contracts} contract(s) @ ${ask:.2f} · {bet.kalshi_market.ticker}")
+    try:
+        resp = kalshi.place_order(
+            ticker=bet.kalshi_market.ticker,
+            side=bet.side,
+            count=bet.contracts,
+            price_dollars=ask,
+        )
+        order = resp.get("order", {})
+        order_id = order.get("order_id", "unknown")
+        status = order.get("status", "unknown")
+        filled = int(float(order.get("fill_count_fp", "0") or "0"))
+
+        if filled == bet.contracts:
+            print(f"  ✅  Filled {filled}/{bet.contracts} contracts · order {order_id}")
+        elif filled > 0:
+            print(f"  ⚠️   Partial fill: {filled}/{bet.contracts} contracts · order {order_id}  (status: {status})")
+        else:
+            print(f"  ❌  No fill: 0/{bet.contracts} contracts · order {order_id}  (status: {status})")
+
+        if filled > 0:
+            record_bet(
+                ticker=bet.kalshi_market.ticker,
+                sport=bet.kalshi_market.sport_type,
+                side=bet.side,
+                team=bet.yes_team,
+                contracts=bet.contracts,
+                fill_count=filled,
+                price=ask,
+                edge=bet.edge,
+                sharp_prob=bet.sharp_true_prob,
+                kalshi_prob=bet.kalshi_implied_prob,
+                game_time=bet.game_time,
+                order_id=order_id,
+            )
+
+    except Exception as exc:
+        print(f"  ❌  Order failed ({bet.kalshi_market.ticker}): {exc}")
+
+
+def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[str, str]) -> int:
+    """
+    Automatically place bets on qualifying value bets.
+
+    A bet qualifies when ALL of the following are true:
+        bet.edge                >= config.AUTO_BET_MIN_EDGE
+        bet.kalshi_implied_prob >= config.AUTO_BET_MIN_KALSHI_PROB
+        game not already in the bet ledger (checked via already_bet_tickers)
+
+    Returns the number of bets placed.
+    """
+    from db.bets import game_key
+    placed = 0
+    for bet in value_bets:
+        if bet.edge < config.AUTO_BET_MIN_EDGE:
+            continue
+        if bet.kalshi_implied_prob < config.AUTO_BET_MIN_KALSHI_PROB:
+            continue
+        if game_key(bet.kalshi_market.ticker) in already_bet_tickers:
+            continue
+        print(f"  [Auto-Bet] Edge {bet.edge * 100:.1f}% · Kalshi {bet.kalshi_implied_prob * 100:.1f}% — qualifying bet:")
+        _place_bet(kalshi, bet)
+        placed += 1
+    return placed
+
+
 def main() -> None:
     args = _parse_args()
     target_date = _resolve_date(args.date)
@@ -232,6 +338,8 @@ def main() -> None:
     print(f"║  Min edge     : {config.MIN_EDGE * 100:.1f}%")
     print(f"║  Bankroll     : ${config.BANKROLL:,.2f}")
     print(f"║  Kelly mult   : {config.KELLY_FRACTION * 100:.0f}% (fractional)")
+    if args.auto_bet:
+        print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  Kalshi prob ≥ {config.AUTO_BET_MIN_KALSHI_PROB * 100:.0f}%)")
     print("╚══════════════════════════════════════════════════════════\n")
 
     _validate_config()
@@ -240,11 +348,19 @@ def main() -> None:
     kalshi = KalshiClient()
     odds = OddsClient()
 
-    settle_open_bets(kalshi)
-
     while True:
+        settle_open_bets(kalshi)
         already_bet: dict[str, str] = get_active_tickers()
-        value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet)
+        value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=args.auto_bet)
+
+        # Auto-bet qualifying rows before showing the table
+        if args.auto_bet and value_bets:
+            n_placed = _auto_bet(kalshi, value_bets, already_bet)
+            if n_placed:
+                time.sleep(1)
+                # Refresh so the table renders with green arrows on auto-bet rows
+                already_bet = get_active_tickers()
+                value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=args.auto_bet)
 
         if not value_bets:
             print("  No value bets found. Exiting.")
@@ -252,7 +368,7 @@ def main() -> None:
 
         while True:
             try:
-                raw = input(f'  Enter game number(s) to bet (e.g. "1 3 5"), "s" to rescan, or "b" for bye: ').strip()
+                raw = input(f'  Enter game number(s) to bet (e.g. "1 3 5"), "r" to rescan, or "b" for bye: ').strip()
             except (EOFError, KeyboardInterrupt):
                 print("\n[Scanner] Stopped.")
                 return
@@ -261,7 +377,7 @@ def main() -> None:
                 print("  Goodbye!")
                 return
 
-            if raw.lower() in ("rescan", "s"):
+            if raw.lower() in ("rescan", "r"):
                 break  # re-run scan
 
             tokens = raw.split()
@@ -285,46 +401,7 @@ def main() -> None:
 
             print()
             for game_num in game_nums:
-                bet = value_bets[game_num - 1]
-                ask = bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask
-                print(f"  ⏳  Placing: Buy {bet.side} · {bet.yes_team} — {bet.contracts} contract(s) @ ${ask:.2f} · {bet.kalshi_market.ticker}")
-                try:
-                    resp = kalshi.place_order(
-                        ticker=bet.kalshi_market.ticker,
-                        side=bet.side,
-                        count=bet.contracts,
-                        price_dollars=ask,
-                    )
-                    order = resp.get("order", {})
-                    order_id = order.get("order_id", "unknown")
-                    status = order.get("status", "unknown")
-                    filled = int(float(order.get("fill_count_fp", "0") or "0"))
-
-                    if filled == bet.contracts:
-                        print(f"  ✅  Filled {filled}/{bet.contracts} contracts · order {order_id}")
-                    elif filled > 0:
-                        print(f"  ⚠️   Partial fill: {filled}/{bet.contracts} contracts · order {order_id}  (status: {status})")
-                    else:
-                        print(f"  ❌  No fill: 0/{bet.contracts} contracts · order {order_id}  (status: {status})")
-
-                    if filled > 0:
-                        record_bet(
-                            ticker=bet.kalshi_market.ticker,
-                            sport=bet.kalshi_market.sport_type,
-                            side=bet.side,
-                            team=bet.yes_team,
-                            contracts=bet.contracts,
-                            fill_count=filled,
-                            price=ask,
-                            edge=bet.edge,
-                            sharp_prob=bet.sharp_true_prob,
-                            kalshi_prob=bet.kalshi_implied_prob,
-                            game_time=bet.game_time,
-                            order_id=order_id,
-                        )
-
-                except Exception as exc:
-                    print(f"  ❌  Order failed ({bet.kalshi_market.ticker}): {exc}")
+                _place_bet(kalshi, value_bets[game_num - 1])
             print()
             time.sleep(2)
             break  # re-run scan
