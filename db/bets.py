@@ -19,7 +19,7 @@ bets
     kalshi_prob   REAL     Kalshi ask-implied probability
     game_time     TEXT     ISO-8601 UTC game start time
     order_id      TEXT     Kalshi API order ID (or "unknown")
-    outcome       TEXT     NULL=pending, "win", "loss", "push", "void"
+    outcome       TEXT     NULL=pending, "win", "loss", "push", "void", "sell" (early close)
     pnl           REAL     NULL=pending; profit/loss in dollars when settled
 
 Database file is stored at DB_PATH (default: <project_root>/bets.db).
@@ -160,7 +160,7 @@ def get_active_tickers(since_hours: int = 36) -> dict[str, str]:
     cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
     with _conn() as con:
         rows = con.execute(
-            "SELECT ticker FROM bets WHERE placed_at >= ? AND fill_count > 0",
+            "SELECT ticker FROM bets WHERE placed_at >= ? AND fill_count > 0 AND outcome IS NULL",
             (cutoff.isoformat(),),
         ).fetchall()
     return {game_key(row["ticker"]): row["ticker"] for row in rows}

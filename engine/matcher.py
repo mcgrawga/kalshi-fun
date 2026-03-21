@@ -464,9 +464,16 @@ TEAM_ALIASES: dict[str, str] = {
     "mississippi state": "Mississippi St",
     "mississippi state bulldogs": "Mississippi St",
     "nc state": "NC State",
+    "nc st": "NC State",
+    "ncst": "NC State",
     "n.c. state": "NC State",
+    "north carolina state": "NC State",
+    "north carolina state wolfpack": "NC State",
+    "nc state wolfpack": "NC State",
     "north carolina": "North Carolina",
     "north carolina tar heels": "North Carolina",
+    "unc": "North Carolina",
+    "unc tar heels": "North Carolina",
     "notre dame": "Notre Dame",
     "notre dame fighting irish": "Notre Dame",
     "ohio st": "Ohio St",
@@ -1005,6 +1012,15 @@ def match_markets(
         sport = km.sport_type
         yes_canonical = canonicalize(yes_team_raw, sport)
         other_canonical = canonicalize(other_team_raw, sport) if other_team_raw else None
+
+        # The ticker YES-abbrev is more reliable than the market title text.
+        # Kalshi occasionally mislabels teams in titles (e.g. "North Carolina Tar
+        # Heels" for a contract whose ticker ends in "NCST"). If the ticker suffix
+        # has a direct alias, trust it over the title-derived canonical.
+        ticker_suffix = km.ticker.upper().rsplit("-", 1)[-1]  # e.g. "NCST", "TOR"
+        abbrev_canon = canonicalize(ticker_suffix, sport)
+        if abbrev_canon.lower() != ticker_suffix.lower():  # alias was found
+            yes_canonical = abbrev_canon
 
         best_match: Optional[NormalizedOddsMarket] = None
         best_score = 0.0

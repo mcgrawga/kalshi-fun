@@ -272,3 +272,47 @@ class KalshiClient:
                 break
 
         return settlements
+
+    def get_settlement_for_ticker(self, ticker: str) -> Optional[dict]:
+        """
+        Fetch the settlement record for a single specific ticker, if it exists.
+        Returns None if the market has not been settled yet.
+        """
+        data = self._get("/portfolio/settlements", params={"ticker": ticker, "limit": 1})
+        settlements = data.get("settlements", [])
+        # Verify the record actually belongs to this ticker — if the API ignores
+        # the ticker param it would return an unrelated settlement.
+        if settlements and settlements[0].get("ticker") == ticker:
+            return settlements[0]
+        return None
+
+    def get_fills(self, ticker: str, limit: int = 200) -> list[dict]:
+        """
+        Fetch all fill records for a specific ticker from the portfolio.
+
+        Each fill record contains:
+            action         — "buy" or "sell"
+            side           — "yes" or "no"
+            count_fp       — contracts filled (string, e.g. "5.00")
+            yes_price_dollars / no_price_dollars — price per contract (string)
+            fee_cost       — fees paid in dollars (string)
+            created_time   — ISO-8601 UTC timestamp
+            order_id       — associated order ID
+        """
+        fills: list[dict] = []
+        cursor: Optional[str] = None
+
+        while True:
+            params: dict = {"ticker": ticker, "limit": limit}
+            if cursor:
+                params["cursor"] = cursor
+
+            data = self._get("/portfolio/fills", params=params)
+            batch: list[dict] = data.get("fills", [])
+            fills.extend(batch)
+
+            cursor = data.get("cursor")
+            if not cursor or not batch:
+                break
+
+        return fills

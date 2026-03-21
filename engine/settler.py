@@ -1,23 +1,29 @@
 """
-Settlement engine — resolves pending bets against the Kalshi portfolio settlements API.
+Settlement engine — resolves pending bets against the Kalshi portfolio fills and
+settlements APIs.
 
-Called once at startup before each scan to automatically mark resolved bets.
+Called once at the top of every scan cycle to automatically mark resolved bets.
 
 Outcome logic
 -------------
-    YES bet + market resolves YES → win
-    YES bet + market resolves NO  → loss
-    NO  bet + market resolves NO  → win
-    NO  bet + market resolves YES → loss
-    Any bet + void market         → void, pnl = 0
+    Early sell (position closed manually before market resolves):
+        outcome = "sell"
+        pnl     = sell_proceeds − original_cost − sell_fees
 
-P&L formula
------------
-    pnl = (revenue_cents / 100) - cost - fee_dollars
+    Market resolution:
+        YES bet + market resolves YES → win
+        YES bet + market resolves NO  → loss
+        NO  bet + market resolves NO  → win
+        NO  bet + market resolves YES → loss
+        Any bet + void market         → void, pnl = 0
 
-    revenue  : gross payout Kalshi credits you (in cents per the API)
-    cost     : fill_count × price_per_contract, stored in DB at bet time
-    fee_cost : Kalshi maker/taker fee in dollars (string in API response)
+P&L formulas
+------------
+    Early sell:
+        pnl = (sell_price × contracts_sold) − cost − sell_fee_dollars
+
+    Market resolution:
+        pnl = (revenue_cents / 100) − cost − fee_dollars
 """
 
 from clients.kalshi_client import KalshiClient
@@ -26,8 +32,10 @@ from db.bets import get_open_bets, settle_bet
 
 def settle_open_bets(kalshi: KalshiClient) -> None:
     """
-    Check all pending bets (outcome IS NULL, fill_count > 0) against the Kalshi
-    settlements API and write outcome + pnl back to the DB for any that have resolved.
+    Check all pending bets (outcome IS NULL, fill_count > 0) for:
+      1. Market resolution — detected via GET /portfolio/settlements
+      2. Early sells — detected via GET /portfolio/fills (action=sell),
+         only for bets NOT already found in settlements.
     """
     open_bets = get_open_bets()
     if not open_bets:
@@ -35,21 +43,27 @@ def settle_open_bets(kalshi: KalshiClient) -> None:
 
     print(f"\n[Settle] Checking {len(open_bets)} pending bet(s)...")
 
+    # ── Pass 1: market resolution via settlements API ─────────────────────────
+    # Always check settlements first. Kalshi generates "sell" fills internally
+    # when it liquidates winning positions at payout — those must NOT be
+    # misidentified as manual early-closes.
     try:
         settlements = kalshi.get_settlements()
     except Exception as exc:
         print(f"[Settle] ⚠  Could not fetch settlements: {exc}")
-        return
+        settlements = []
 
-    # Build ticker → settlement map for O(1) lookup
     settled_map: dict[str, dict] = {s["ticker"]: s for s in settlements}
 
+    still_open: list = []
     resolved = 0
+
     for bet in open_bets:
         ticker = bet["ticker"]
         s = settled_map.get(ticker)
         if s is None:
-            continue  # market not yet settled
+            still_open.append(bet)
+            continue
 
         market_result = (s.get("market_result") or "").lower()
         side = bet["side"].upper()
@@ -65,12 +79,95 @@ def settle_open_bets(kalshi: KalshiClient) -> None:
             fee_dollars = float(s.get("fee_cost") or 0)
             pnl = revenue_dollars - float(bet["cost"]) - fee_dollars
         else:
-            continue  # unrecognized result — leave pending
+            still_open.append(bet)
+            continue
 
         settle_bet(bet["id"], outcome, pnl)
         icon = "✅" if outcome == "win" else ("❌" if outcome == "loss" else "⚪")
         pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
         print(f"  {icon}  {ticker} · {side} · {outcome.upper()} · {pnl_str}")
+        resolved += 1
+
+    # ── Pass 2: per-ticker resolution + early sell detection ───────────────────
+    # For bets not found in the bulk settlements response, check each one
+    # individually. The market's own `result` field is the authoritative gate:
+    # if it has resolved, it's always a win/loss/void — NEVER a manual sell.
+    for bet in still_open:
+        ticker = bet["ticker"]
+        side   = bet["side"].upper()
+
+        # First: targeted settlement lookup for this specific ticker.
+        # This catches bets that fell through the bulk settlements query.
+        try:
+            s = kalshi.get_settlement_for_ticker(ticker)
+        except Exception as exc:
+            print(f"[Settle] ⚠  Could not fetch settlement for {ticker}: {exc}")
+            s = None
+
+        if s is not None:
+            market_result = (s.get("market_result") or "").lower()
+            if market_result == "void":
+                outcome = "void"
+                pnl = 0.0
+            elif market_result in ("yes", "no"):
+                won = (side == "YES" and market_result == "yes") or \
+                      (side == "NO"  and market_result == "no")
+                outcome = "win" if won else "loss"
+                revenue_dollars = int(s.get("revenue", 0)) / 100.0
+                fee_dollars = float(s.get("fee_cost") or 0)
+                pnl = revenue_dollars - float(bet["cost"]) - fee_dollars
+            else:
+                continue
+            settle_bet(bet["id"], outcome, pnl)
+            icon = "✅" if outcome == "win" else ("❌" if outcome == "loss" else "⚪")
+            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+            print(f"  {icon}  {ticker} · {side} · {outcome.upper()} · {pnl_str}")
+            resolved += 1
+            continue
+
+        # Second: check if the market itself has a result. If the market has
+        # resolved, Kalshi's settlement fills (action='sell' at $1.00) are
+        # internal payouts — not a manual early close. Never treat a resolved
+        # market as a sell.
+        # IMPORTANT: a closed/settled market returns 404 from get_market.
+        # Any exception here means the market is no longer open → leave pending.
+        try:
+            market = kalshi.get_market(ticker)
+            market_result = (market.get("result") or "").lower()
+            market_status = (market.get("status") or "").lower()
+            if market_result in ("yes", "no", "void") or market_status != "open":
+                # Resolved or no longer open — leave pending for next cycle.
+                continue
+        except Exception:
+            # Market not found (likely closed/settled) — do NOT check fills.
+            continue
+
+        # Third: market is still open — check fills for a manual early sell.
+        try:
+            fills = kalshi.get_fills(ticker)
+        except Exception as exc:
+            print(f"[Settle] ⚠  Could not fetch fills for {ticker}: {exc}")
+            continue
+
+        sell_fills = [f for f in fills if f.get("action") == "sell"]
+        if not sell_fills:
+            continue
+
+        total_sold = sum(float(f.get("count_fp", 0)) for f in sell_fills)
+        if total_sold < float(bet["fill_count"]):
+            continue  # Partial sell — leave pending
+
+        sell_proceeds = sum(
+            float(f["yes_price_dollars"]) * float(f["count_fp"]) if side == "YES"
+            else float(f["no_price_dollars"]) * float(f["count_fp"])
+            for f in sell_fills
+        )
+        sell_fees = sum(float(f.get("fee_cost") or 0) for f in sell_fills)
+        pnl = sell_proceeds - float(bet["cost"]) - sell_fees
+
+        settle_bet(bet["id"], "sell", pnl)
+        pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+        print(f"  💰  {ticker} · {side} · SOLD (early close) · {pnl_str}")
         resolved += 1
 
     if resolved:
