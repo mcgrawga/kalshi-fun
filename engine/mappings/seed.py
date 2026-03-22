@@ -15,7 +15,7 @@ Run once:  python -m engine.mappings.seed
 import json
 from pathlib import Path
 
-from engine.aliases import nba, nhl, ncaab, wncaab, nrl, soccer_mls
+from engine.aliases import nba, nhl, ncaab, wncaab, nrl, soccer_mls, mlb
 
 _MAP_DIR = Path(__file__).resolve().parent
 
@@ -26,6 +26,7 @@ _SPORTS = {
     "wncaab.json":         wncaab.ALIASES,
     "nrl.json":            nrl.ALIASES,
     "soccer_usa_mls.json": soccer_mls.ALIASES,
+    "mlb.json": mlb.ALIASES,
 }
 
 

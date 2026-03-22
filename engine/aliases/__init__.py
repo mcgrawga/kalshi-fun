@@ -10,7 +10,7 @@ Callers should look up ALIASES_BY_SPORT.get(sport, {}) rather than importing
 individual modules directly.
 """
 
-from engine.aliases import nba, nhl, ncaab, wncaab, nrl, soccer_mls
+from engine.aliases import nba, nhl, ncaab, wncaab, nrl, soccer_mls, mlb
 
 ALIASES_BY_SPORT: dict[str, dict[str, str]] = {
     "basketball_nba":      nba.ALIASES,

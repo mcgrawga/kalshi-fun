@@ -38,8 +38,7 @@ _SPORT_FILES: dict[str, str] = {
     "basketball_ncaab": "ncaab.json",
     "basketball_wncaab": "wncaab.json",
     "rugbyleague_nrl":  "nrl.json",
-    "soccer_usa_mls":   "soccer_usa_mls.json",
-}
+    "soccer_usa_mls":   "soccer_usa_mls.json",    "baseball_mlb": "mlb.json",}
 
 # ─── In-memory caches ────────────────────────────────────────────────────────
 # Forward: kalshi_name → odds_name   (keys are lowercased for case-insensitive lookup)

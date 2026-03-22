@@ -78,6 +78,7 @@ def print_opportunities(bets: list[ValueBet], already_bet_tickers: dict[str, str
             "icehockey_nhl": "NHL",
             "rugbyleague_nrl": "NRL",
             "soccer_usa_mls": "MLS",
+        "baseball_mlb": "MLB",
         }
         sport_label = _SPORT_LABELS.get(
             sm.sport,
