@@ -20,6 +20,7 @@ _SERIES_TO_SPORT: dict[str, str] = {
     "KXNCAAWBGAME": "basketball_wncaab",
     "KXNHLGAME": "icehockey_nhl",
     "KXRUGBYNRLMATCH": "rugbyleague_nrl",
+    "KXMLSGAME": "soccer_usa_mls",
 }
 
 

@@ -38,6 +38,7 @@ _SPORT_FILES: dict[str, str] = {
     "basketball_ncaab": "ncaab.json",
     "basketball_wncaab": "wncaab.json",
     "rugbyleague_nrl":  "nrl.json",
+    "soccer_usa_mls":   "soccer_usa_mls.json",
 }
 
 # ─── In-memory caches ────────────────────────────────────────────────────────

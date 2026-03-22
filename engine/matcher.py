@@ -119,12 +119,18 @@ def extract_teams_from_ticker_and_title(
         # Last resort: assume away team is YES (first team listed)
         return away_raw, home_raw
 
-    # ── NRL / "X vs Y Winner?" format ─────────────────────────────────────────
-    # NRL titles don't use "at" — they use "X vs Y Winner?".
-    # The team_concat order is REVERSED relative to the title order for NRL:
+    # ── "X vs Y Winner?" format (NRL, Soccer, etc.) ────────────────────────────
+    # NRL and soccer titles use "X vs Y Winner?" instead of "X at Y Winner?".
+    #
+    # NRL tickers reverse the concat order relative to the title:
     #   prefix of concat → second team in title
     #   suffix of concat → first team in title
-    # (opposite of the NBA/NHL "away at home" convention above)
+    #
+    # Soccer (MLS, EPL, etc.) tickers keep the SAME order as the title:
+    #   prefix of concat → first team in title
+    #   suffix of concat → second team in title
+    #
+    # We detect NRL by checking if the ticker starts with "KXRUGBY".
     vs_winner_m = _VS_WINNER_RE.search(title)
     if vs_winner_m:
         t1 = vs_winner_m.group(1).strip()
@@ -132,16 +138,25 @@ def extract_teams_from_ticker_and_title(
 
         ticker_parts = ticker.upper().split("-")
         yes_abbrev = ticker_parts[-1] if ticker_parts else ""
+        is_nrl = ticker.upper().startswith("KXRUGBY")
 
         if yes_abbrev:
             game_seg = ticker_parts[1] if len(ticker_parts) > 1 else ""
             team_concat = re.sub(r'^\d+[A-Z]{3}\d+', '', game_seg)
             n = len(yes_abbrev)
             if team_concat and len(team_concat) > n:
-                if team_concat[:n] == yes_abbrev:
-                    return t2, t1   # YES = second title team
-                elif team_concat[-n:] == yes_abbrev:
-                    return t1, t2   # YES = first title team
+                if is_nrl:
+                    # NRL: concat is reversed vs title
+                    if team_concat[:n] == yes_abbrev:
+                        return t2, t1   # YES = second title team
+                    elif team_concat[-n:] == yes_abbrev:
+                        return t1, t2   # YES = first title team
+                else:
+                    # Soccer / other: concat matches title order
+                    if team_concat[:n] == yes_abbrev:
+                        return t1, t2   # YES = first title team
+                    elif team_concat[-n:] == yes_abbrev:
+                        return t2, t1   # YES = second title team
 
         return t1, t2  # fallback: assume first listed team is YES
 

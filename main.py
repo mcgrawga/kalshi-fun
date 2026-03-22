@@ -377,6 +377,7 @@ def _manage_mappings_mode() -> None:
         "basketball_ncaab": "NCAAB",
         "basketball_wncaab": "NCAAW",
         "rugbyleague_nrl": "NRL",
+        "soccer_usa_mls": "MLS",
     }
 
     print("\n╔══════════════════════════════════════════════════════════")
@@ -392,7 +393,7 @@ def _manage_mappings_mode() -> None:
 
     while True:
         print("  Commands:")
-        print("    [1-5] View mappings for a sport (1=NBA 2=NHL 3=NCAAB 4=NCAAW 5=NRL)")
+        print("    [1-6] View mappings for a sport (1=NBA 2=NHL 3=NCAAB 4=NCAAW 5=NRL 6=MLS)")
         print("    [a]   Add a mapping")
         print("    [d]   Delete a mapping")
         print("    [s]   Search mappings")
@@ -410,7 +411,7 @@ def _manage_mappings_mode() -> None:
         sports_list = list(_SPORT_FILES.keys())
         sport_labels_list = [_SPORT_LABELS.get(s, s) for s in sports_list]
 
-        if cmd in ("1", "2", "3", "4", "5"):
+        if cmd in ("1", "2", "3", "4", "5", "6"):
             idx = int(cmd) - 1
             if idx >= len(sports_list):
                 continue
@@ -428,7 +429,7 @@ def _manage_mappings_mode() -> None:
 
         elif cmd == "a":
             print("\n  Add a new mapping:")
-            sport_str = input("    Sport (1=NBA 2=NHL 3=NCAAB 4=NCAAW 5=NRL): ").strip()
+            sport_str = input("    Sport (1=NBA 2=NHL 3=NCAAB 4=NCAAW 5=NRL 6=MLS): ").strip()
             try:
                 sport = sports_list[int(sport_str) - 1]
             except (ValueError, IndexError):
@@ -444,7 +445,7 @@ def _manage_mappings_mode() -> None:
 
         elif cmd == "d":
             print("\n  Delete a mapping:")
-            sport_str = input("    Sport (1=NBA 2=NHL 3=NCAAB 4=NCAAW 5=NRL): ").strip()
+            sport_str = input("    Sport (1=NBA 2=NHL 3=NCAAB 4=NCAAW 5=NRL 6=MLS): ").strip()
             try:
                 sport = sports_list[int(sport_str) - 1]
             except (ValueError, IndexError):

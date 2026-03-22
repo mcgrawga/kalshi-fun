@@ -50,6 +50,19 @@ def remove_vig_multiplicative(
     return prob_a / overround, prob_b / overround
 
 
+def remove_vig_3way(
+    prob_a: float, prob_b: float, prob_c: float
+) -> tuple[float, float, float]:
+    """
+    Remove vig from a 3-way market (e.g. soccer Home / Draw / Away).
+
+    All three inputs are raw implied probabilities that sum to > 1 due to vig.
+    Returns (true_a, true_b, true_c) which sum to exactly 1.0.
+    """
+    overround = prob_a + prob_b + prob_c
+    return prob_a / overround, prob_b / overround, prob_c / overround
+
+
 def vig_percentage(prob_a: float, prob_b: float) -> float:
     """Return the book's vig as a percentage (e.g. 0.048 = 4.8%)."""
     return (prob_a + prob_b) - 1.0
@@ -91,14 +104,17 @@ def normalize_game(
     home_team_name = game.get("home_team", "")
     away_team_name = game.get("away_team", "")
 
-    # Match outcomes to home/away by team name
+    # Match outcomes to home/away/draw by team name
     home_odds: Optional[float] = None
     away_odds: Optional[float] = None
+    draw_odds: Optional[float] = None
     for outcome in outcomes:
         if outcome["name"] == home_team_name:
             home_odds = float(outcome["price"])
         elif outcome["name"] == away_team_name:
             away_odds = float(outcome["price"])
+        elif outcome["name"].lower() == "draw":
+            draw_odds = float(outcome["price"])
 
     # Fallback: assign by position if names don't exactly match
     if home_odds is None or away_odds is None:
@@ -107,12 +123,27 @@ def normalize_game(
             away_odds = float(outcomes[1]["price"])
             home_team_name = outcomes[0]["name"]
             away_team_name = outcomes[1]["name"]
+            # Check for draw in 3rd outcome
+            if len(outcomes) >= 3 and draw_odds is None:
+                third = outcomes[2]
+                if third["name"].lower() == "draw" or third["name"] not in (home_team_name, away_team_name):
+                    draw_odds = float(third["price"])
         else:
             return None
 
     raw_home_prob = american_to_implied(home_odds)
     raw_away_prob = american_to_implied(away_odds)
-    home_prob, away_prob = remove_vig_multiplicative(raw_home_prob, raw_away_prob)
+
+    # 3-way markets (soccer): vig removal must include the draw outcome so
+    # that home/away probabilities reflect the TRUE chance of each team winning
+    # (not the inflated 2-way number that ignores draw probability).
+    if draw_odds is not None:
+        raw_draw_prob = american_to_implied(draw_odds)
+        home_prob, draw_prob, away_prob = remove_vig_3way(
+            raw_home_prob, raw_draw_prob, raw_away_prob
+        )
+    else:
+        home_prob, away_prob = remove_vig_multiplicative(raw_home_prob, raw_away_prob)
 
     commence_time = datetime.fromisoformat(
         game["commence_time"].replace("Z", "+00:00")

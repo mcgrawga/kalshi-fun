@@ -37,6 +37,7 @@ SPORTS: list[str] = [
     "basketball_wncaab",
     "icehockey_nhl",
     "rugbyleague_nrl",
+    "soccer_usa_mls",
 ]
 
 # Kalshi series tickers for game-level moneyline markets.
@@ -45,7 +46,7 @@ SPORTS: list[str] = [
 # KXNCAAWBGAME    = NCAA Women's Basketball game winner
 # KXNHLGAME       = NHL game winner
 # KXRUGBYNRLMATCH = NRL (National Rugby League) match winner
-KALSHI_SERIES: list[str] = ["KXNBAGAME", "KXNCAAMBGAME", "KXNCAAWBGAME", "KXNHLGAME", "KXRUGBYNRLMATCH"]
+KALSHI_SERIES: list[str] = ["KXNBAGAME", "KXNCAAMBGAME", "KXNCAAWBGAME", "KXNHLGAME", "KXRUGBYNRLMATCH", "KXMLSGAME"]
 
 # ─── Value Bet Thresholds ────────────────────────────────────────────────────
 # Minimum edge (sharp prob − Kalshi prob) to flag a bet.
