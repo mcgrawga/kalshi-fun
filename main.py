@@ -87,7 +87,7 @@ def _parse_kalshi_market(raw: dict) -> KalshiMarket:
     )
 
 
-def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = None, debug: bool = True, already_bet_tickers: dict[str, str] | None = None, auto_bet: bool = False) -> list:
+def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = None, debug: bool = True, already_bet_tickers: dict[str, str] | None = None, auto_bet: bool = False, auto_loop: bool = False) -> list:
     """Execute one full scan cycle. Returns the list of value bets found."""
     ts = datetime.now().strftime("%H:%M:%S")
     date_label = target_date.strftime("%a %b %-d") if target_date else "all upcoming"
@@ -152,7 +152,7 @@ def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = 
     print(f"[OddsAPI] {total_odds} games total across {len(config.SPORTS)} sports.")
 
     # 5. Fuzzy-match Kalshi markets to sportsbook games
-    matched = match_markets(kalshi_markets, normalized_games, debug=debug)
+    matched = match_markets(kalshi_markets, normalized_games, debug=debug, auto_loop=auto_loop)
 
     # Log per-sport match breakdown
     match_by_sport = Counter(mm.kalshi.sport_type for mm in matched)
@@ -247,6 +247,16 @@ def _parse_args() -> argparse.Namespace:
             "same AUTO_BET_MIN_EDGE and AUTO_BET_MIN_KALSHI_PROB thresholds as --auto-bet, "
             "then waits SECONDS before rescanning. No prompt is shown — a countdown "
             "displays instead. Press Ctrl+C to stop. Cannot be combined with --auto-bet."
+        ),
+    )
+    p.add_argument(
+        "--manage-mappings",
+        action="store_true",
+        default=False,
+        help=(
+            "Review and manage team-name mappings. Runs one scan, then shows all "
+            "mapping entries per sport and lets you add/remove entries interactively. "
+            "No bets are placed in this mode."
         ),
     )
     return p.parse_args()
@@ -350,6 +360,134 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
     return placed
 
 
+def _manage_mappings_mode() -> None:
+    """
+    Interactive mode for reviewing and managing team-name mappings.
+
+    Shows all mapping entries per sport, allows adding/removing entries,
+    and displays stats on mapping coverage.
+    """
+    from engine.mappings import get_all_mappings, save_mapping, reload
+    from engine.mappings import _SPORT_FILES, _DIR
+    import json
+
+    _SPORT_LABELS = {
+        "basketball_nba": "NBA",
+        "icehockey_nhl": "NHL",
+        "basketball_ncaab": "NCAAB",
+        "basketball_wncaab": "NCAAW",
+        "rugbyleague_nrl": "NRL",
+    }
+
+    print("\n╔══════════════════════════════════════════════════════════")
+    print("║          Team Name Mapping Manager                       ")
+    print("╚══════════════════════════════════════════════════════════\n")
+
+    # Show summary
+    for sport, fname in _SPORT_FILES.items():
+        mappings = get_all_mappings(sport)
+        label = _SPORT_LABELS.get(sport, sport)
+        print(f"  {label:<8} {len(mappings):>4} mappings  ({fname})")
+    print()
+
+    while True:
+        print("  Commands:")
+        print("    [1-5] View mappings for a sport (1=NBA 2=NHL 3=NCAAB 4=NCAAW 5=NRL)")
+        print("    [a]   Add a mapping")
+        print("    [d]   Delete a mapping")
+        print("    [s]   Search mappings")
+        print("    [q]   Quit")
+
+        try:
+            cmd = input("\n  > ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n")
+            return
+
+        if cmd == "q":
+            return
+
+        sports_list = list(_SPORT_FILES.keys())
+        sport_labels_list = [_SPORT_LABELS.get(s, s) for s in sports_list]
+
+        if cmd in ("1", "2", "3", "4", "5"):
+            idx = int(cmd) - 1
+            if idx >= len(sports_list):
+                continue
+            sport = sports_list[idx]
+            label = sport_labels_list[idx]
+            mappings = get_all_mappings(sport)
+            print(f"\n  ── {label} Mappings ({len(mappings)} entries) ──")
+            for key_lower, odds_name in sorted(mappings.items()):
+                kalshi_display = key_lower.title()
+                if kalshi_display.lower() == odds_name.lower():
+                    print(f"    {kalshi_display:<40} = {odds_name}")
+                else:
+                    print(f"    {kalshi_display:<40} → {odds_name}")
+            print()
+
+        elif cmd == "a":
+            print("\n  Add a new mapping:")
+            sport_str = input("    Sport (1=NBA 2=NHL 3=NCAAB 4=NCAAW 5=NRL): ").strip()
+            try:
+                sport = sports_list[int(sport_str) - 1]
+            except (ValueError, IndexError):
+                print("    Invalid sport.")
+                continue
+            kalshi_name = input("    Kalshi team name: ").strip()
+            odds_name = input("    Odds API team name: ").strip()
+            if kalshi_name and odds_name:
+                save_mapping(sport, kalshi_name, odds_name)
+                print(f"    ✅ Saved: '{kalshi_name}' → '{odds_name}' ({_SPORT_LABELS.get(sport, sport)})")
+            else:
+                print("    Cancelled.")
+
+        elif cmd == "d":
+            print("\n  Delete a mapping:")
+            sport_str = input("    Sport (1=NBA 2=NHL 3=NCAAB 4=NCAAW 5=NRL): ").strip()
+            try:
+                sport = sports_list[int(sport_str) - 1]
+            except (ValueError, IndexError):
+                print("    Invalid sport.")
+                continue
+            kalshi_name = input("    Kalshi team name to remove: ").strip()
+            # Remove from JSON file directly
+            fname = _SPORT_FILES.get(sport)
+            if fname:
+                fpath = _DIR / fname
+                if fpath.exists():
+                    with open(fpath) as f:
+                        data = json.load(f)
+                    # Find and remove (case-insensitive key search)
+                    removed = None
+                    for k in list(data.keys()):
+                        if k.lower() == kalshi_name.lower():
+                            removed = k
+                            del data[k]
+                            break
+                    if removed:
+                        with open(fpath, "w") as f:
+                            json.dump(data, f, indent=2, ensure_ascii=False)
+                            f.write("\n")
+                        reload()
+                        print(f"    ✅ Removed '{removed}' from {_SPORT_LABELS.get(sport, sport)}")
+                    else:
+                        print(f"    Not found.")
+
+        elif cmd == "s":
+            query = input("    Search: ").strip().lower()
+            if not query:
+                continue
+            print()
+            for sport in sports_list:
+                label = _SPORT_LABELS.get(sport, sport)
+                mappings = get_all_mappings(sport)
+                for key_lower, odds_name in sorted(mappings.items()):
+                    if query in key_lower or query in odds_name.lower():
+                        print(f"    [{label}] {key_lower.title():<40} → {odds_name}")
+            print()
+
+
 def main() -> None:
     args = _parse_args()
     target_date = _resolve_date(args.date)
@@ -379,13 +517,18 @@ def main() -> None:
     kalshi = KalshiClient()
     odds = OddsClient()
 
+    if args.manage_mappings:
+        _manage_mappings_mode()
+        return
+
     # In loop mode, auto_bet behaviour is always active
     do_auto_bet = args.auto_bet or (args.auto_bet_loop is not None)
+    is_loop = args.auto_bet_loop is not None
 
     while True:
         settle_open_bets(kalshi)
         already_bet: dict[str, str] = get_active_tickers()
-        value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet)
+        value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
 
         # Auto-bet qualifying rows before showing the table
         if do_auto_bet and value_bets:
@@ -394,7 +537,7 @@ def main() -> None:
                 time.sleep(1)
                 # Refresh so the table renders with green arrows on auto-bet rows
                 already_bet = get_active_tickers()
-                value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet)
+                value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
 
         # ── Loop mode: countdown then rescan, no prompt ────────────────────
         if args.auto_bet_loop is not None:

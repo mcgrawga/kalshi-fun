@@ -67,6 +67,10 @@ def print_opportunities(bets: list[ValueBet], already_bet_tickers: dict[str, str
         else:
             already_tag = ""
         action = f"Buy {b.side} · {b.yes_team}{already_tag}"
+        sm = b.sportsbook_market
+        # yes_team is always the team named in the Kalshi Action column, regardless
+        # of side. The opponent is whichever sportsbook team is NOT the yes_team.
+        opponent = sm.away_team if b.yes_team == sm.home_team else sm.home_team
         _SPORT_LABELS: dict[str, str] = {
             "basketball_nba": "NBA",
             "basketball_ncaab": "NCAAB",
@@ -75,8 +79,8 @@ def print_opportunities(bets: list[ValueBet], already_bet_tickers: dict[str, str
             "rugbyleague_nrl": "NRL",
         }
         sport_label = _SPORT_LABELS.get(
-            b.sportsbook_market.sport,
-            b.sportsbook_market.sport.replace("_", " ").title(),
+            sm.sport,
+            sm.sport.replace("_", " ").title(),
         )
         rows.append([
             sport_label,
@@ -85,6 +89,7 @@ def print_opportunities(bets: list[ValueBet], already_bet_tickers: dict[str, str
             f"{b.edge * 100:+.1f}%",
             i + 1,
             action,
+            opponent,
             f"{b.contracts}",
             f"${b.recommended_bet:.2f}{flag}",
             _ev(b.ev_per_dollar),
@@ -94,7 +99,7 @@ def print_opportunities(bets: list[ValueBet], already_bet_tickers: dict[str, str
 
     headers = [
         "Sport", "Sharp Prob", "Kalshi Prob", "Edge", "Game #",
-        "Kalshi Action", "Contracts", "Bet Size", "EV/$1", "Ticker", "Game Time",
+        "Kalshi Action", "Opponent", "Contracts", "Bet Size", "EV/$1", "Ticker", "Game Time",
     ]
 
     table = tabulate(rows, headers=headers, tablefmt="rounded_outline")
