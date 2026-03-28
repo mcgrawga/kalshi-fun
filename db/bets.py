@@ -19,6 +19,7 @@ bets
     kalshi_prob   REAL     Kalshi ask-implied probability
     game_time     TEXT     ISO-8601 UTC game start time
     order_id      TEXT     Kalshi API order ID (or "unknown")
+    bankroll_at_bet REAL   Cash balance (dollars) just before the bet was placed
     outcome       TEXT     NULL=pending, "win", "loss", "push", "void", "sell" (early close)
     pnl           REAL     NULL=pending; profit/loss in dollars when settled
 
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS bets (
     kalshi_prob REAL    NOT NULL,
     game_time   TEXT    NOT NULL,
     order_id    TEXT    NOT NULL DEFAULT '',
+    bankroll_at_bet REAL,
     outcome     TEXT,
     pnl         REAL
 );
@@ -88,6 +90,11 @@ def init_db() -> None:
             con.execute("ALTER TABLE bets ADD COLUMN opponent TEXT NOT NULL DEFAULT ''")
         except Exception:
             pass  # column already exists
+        # Migration: add bankroll_at_bet column for existing databases.
+        try:
+            con.execute("ALTER TABLE bets ADD COLUMN bankroll_at_bet REAL")
+        except Exception:
+            pass  # column already exists
 
 
 def record_bet(
@@ -105,6 +112,7 @@ def record_bet(
     kalshi_prob: float,
     game_time: datetime,
     order_id: str,
+    bankroll_at_bet: float | None = None,
 ) -> int:
     """
     Insert a new bet record and return its row id.
@@ -119,8 +127,9 @@ def record_bet(
             """
             INSERT INTO bets
                 (placed_at, ticker, sport, side, team, opponent, contracts, fill_count,
-                 price, cost, edge, sharp_prob, kalshi_prob, game_time, order_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 price, cost, edge, sharp_prob, kalshi_prob, game_time, order_id,
+                 bankroll_at_bet)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 placed_at,
@@ -138,6 +147,7 @@ def record_bet(
                 round(kalshi_prob, 6),
                 game_time.isoformat(),
                 order_id,
+                round(bankroll_at_bet, 4) if bankroll_at_bet is not None else None,
             ),
         )
         return cur.lastrowid

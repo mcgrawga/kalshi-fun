@@ -87,8 +87,8 @@ def _parse_kalshi_market(raw: dict) -> KalshiMarket:
     )
 
 
-def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = None, debug: bool = True, already_bet_tickers: dict[str, str] | None = None, auto_bet: bool = False, auto_loop: bool = False) -> list:
-    """Execute one full scan cycle. Returns the list of value bets found."""
+def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = None, debug: bool = True, already_bet_tickers: dict[str, str] | None = None, auto_bet: bool = False, auto_loop: bool = False) -> tuple[list, list]:
+    """Execute one full scan cycle. Returns (value_bets, matched_markets)."""
     ts = datetime.now().strftime("%H:%M:%S")
     date_label = target_date.strftime("%a %b %-d") if target_date else "all upcoming"
     print(f"\n[{ts}] ── Scan  {date_label} ─────────────────────────────────")
@@ -177,7 +177,7 @@ def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = 
     print_open_bets(open_bets)
     print_opportunities(value_bets, already_bet_tickers=already_bet_tickers or {})
 
-    return value_bets
+    return value_bets, matched
 
 
 def _validate_config() -> None:
@@ -301,6 +301,7 @@ def _place_bet(kalshi: KalshiClient, bet) -> None:
     ask = bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask
     sm = bet.sportsbook_market
     opponent = sm.away_team if bet.yes_team == sm.home_team else sm.home_team
+    bankroll_before = kalshi.get_balance()
     print(f"  ⏳  Placing: Buy {bet.side} · {bet.yes_team} — {bet.contracts} contract(s) @ ${ask:.2f} · {bet.kalshi_market.ticker}")
     try:
         resp = kalshi.place_order(
@@ -336,6 +337,7 @@ def _place_bet(kalshi: KalshiClient, bet) -> None:
                 kalshi_prob=bet.kalshi_implied_prob,
                 game_time=bet.game_time,
                 order_id=order_id,
+                bankroll_at_bet=bankroll_before,
             )
 
     except Exception as exc:
@@ -356,7 +358,7 @@ def _format_sharp_ranges() -> str:
     return ", ".join(f"{lo*100:.0f}-{hi*100:.0f}%" for lo, hi in config.AUTO_BET_SHARP_RANGES)
 
 
-def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[str, str]) -> int:
+def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[str, str], matched: list) -> int:
     """
     Automatically place bets on qualifying value bets.
 
@@ -364,6 +366,9 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
         bet.edge            >= config.AUTO_BET_MIN_EDGE
         bet.sharp_true_prob within config.AUTO_BET_SHARP_RANGES
         game not already in the bet ledger (checked via already_bet_tickers)
+
+    After each placement the bankroll is refreshed from the API and value bets
+    are re-sized via scan_all so subsequent bets use the updated cash balance.
 
     Returns the number of bets placed.
     """
@@ -379,6 +384,9 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
         print(f"  [Auto-Bet] Edge {bet.edge * 100:.1f}% · Kalshi {bet.kalshi_implied_prob * 100:.1f}% · Sharp {bet.sharp_true_prob * 100:.1f}% — qualifying bet:")
         _place_bet(kalshi, bet)
         placed += 1
+        # Refresh bankroll and re-size remaining bets against updated balance.
+        updated_bankroll = kalshi.get_balance()
+        value_bets = scan_all(matched, bankroll=updated_bankroll)
     return placed
 
 
@@ -551,16 +559,16 @@ def main() -> None:
     while True:
         settle_open_bets(kalshi)
         already_bet: dict[str, str] = get_active_tickers()
-        value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
+        value_bets, matched = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
 
         # Auto-bet qualifying rows before showing the table
         if do_auto_bet and value_bets:
-            n_placed = _auto_bet(kalshi, value_bets, already_bet)
+            n_placed = _auto_bet(kalshi, value_bets, already_bet, matched)
             if n_placed:
                 time.sleep(1)
                 # Refresh so the table renders with green arrows on auto-bet rows
                 already_bet = get_active_tickers()
-                value_bets = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
+                value_bets, matched = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
 
         # ── Loop mode: countdown then rescan, no prompt ────────────────────
         if args.auto_bet_loop is not None:

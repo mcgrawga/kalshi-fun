@@ -47,7 +47,7 @@ SPORTS: list[str] = [
 # KXNCAAWBGAME    = NCAA Women's Basketball game winner
 # KXNHLGAME       = NHL game winner
 # KXRUGBYNRLMATCH = NRL (National Rugby League) match winner
-KALSHI_SERIES: list[str] = ["KXNBAGAME", "KXNCAAMBGAME", "KXNCAAWBGAME", "KXNHLGAME", "KXRUGBYNRLMATCH", "KXMLSGAME", "KXMLBGAME", "KXMLBSTGAME"]
+KALSHI_SERIES: list[str] = ["KXNBAGAME", "KXNCAAMBGAME", "KXNCAAWBGAME", "KXNHLGAME", "KXRUGBYNRLMATCH", "KXMLSGAME", "KXMLBGAME"]
 
 # ─── Value Bet Thresholds ────────────────────────────────────────────────────
 # Minimum edge (sharp prob − Kalshi prob) to flag a bet.
