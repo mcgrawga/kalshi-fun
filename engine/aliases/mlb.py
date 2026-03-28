@@ -42,6 +42,7 @@ ALIASES: dict[str, str] = {
     # ── Chicago White Sox ─────────────────────────────────────────────────────
     "chicago white sox": "Chicago White Sox",
     "chicago w": "Chicago White Sox",
+    "chicago ws": "Chicago White Sox",
     "white sox": "Chicago White Sox",
     "chw": "Chicago White Sox",
     # ── Cincinnati Reds ───────────────────────────────────────────────────────
@@ -114,11 +115,11 @@ ALIASES: dict[str, str] = {
     "yankees": "New York Yankees",
     "nyy": "New York Yankees",
     # ── Oakland Athletics / Athletics ─────────────────────────────────────────
-    "oakland athletics": "Oakland Athletics",
-    "athletics": "Oakland Athletics",
-    "a's": "Oakland Athletics",
-    "ath": "Oakland Athletics",
-    "oakland": "Oakland Athletics",
+    "oakland athletics": "Athletics",
+    "athletics": "Athletics",
+    "a's": "Athletics",
+    "ath": "Athletics",
+    "oakland": "Athletics",
     # ── Philadelphia Phillies ─────────────────────────────────────────────────
     "philadelphia phillies": "Philadelphia Phillies",
     "philadelphia": "Philadelphia Phillies",

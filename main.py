@@ -31,7 +31,7 @@ from db.bets import init_db, record_bet, get_active_tickers
 from engine.settler import settle_open_bets
 
 
-_TICKER_DATE_RE = re.compile(r'-(\d{2})([A-Z]{3})(\d{2})[A-Z]', re.IGNORECASE)
+_TICKER_DATE_RE = re.compile(r'-(\d{2})([A-Z]{3})(\d{2})[A-Z0-9]', re.IGNORECASE)
 _MONTH_MAP = {
     "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
     "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
@@ -169,7 +169,7 @@ def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = 
     # 7. Report
     print_summary(len(kalshi_markets), len(normalized_games), len(matched), len(value_bets))
     if auto_bet:
-        print(f"  [Auto-Bet] ENABLED  |  min edge: {config.AUTO_BET_MIN_EDGE * 100:.1f}%  |  min Kalshi prob: {config.AUTO_BET_MIN_KALSHI_PROB * 100:.0f}%")
+        print(f"  [Auto-Bet] ENABLED  |  min edge: {config.AUTO_BET_MIN_EDGE * 100:.1f}%  |  sharp ranges: {_format_sharp_ranges()}")
     print_opportunities(value_bets, already_bet_tickers=already_bet_tickers or {})
 
     return value_bets
@@ -232,7 +232,7 @@ def _parse_args() -> argparse.Namespace:
         default=False,
         help=(
             "Automatically place bets on value bets where edge >= AUTO_BET_MIN_EDGE "
-            "and Kalshi implied prob >= AUTO_BET_MIN_KALSHI_PROB (both set in config.py). "
+            "and sharp prob within AUTO_BET_SHARP_RANGES (both set in config.py). "
             "Games already in the bet ledger are always skipped. "
             "The table and manual prompt still appear after auto-bets are placed."
         ),
@@ -244,7 +244,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Run in continuous unattended loop mode. Automatically places bets using the "
-            "same AUTO_BET_MIN_EDGE and AUTO_BET_MIN_KALSHI_PROB thresholds as --auto-bet, "
+            "same AUTO_BET_MIN_EDGE and AUTO_BET_SHARP_RANGES thresholds as --auto-bet, "
             "then waits SECONDS before rescanning. No prompt is shown — a countdown "
             "displays instead. Press Ctrl+C to stop. Cannot be combined with --auto-bet."
         ),
@@ -334,13 +334,27 @@ def _place_bet(kalshi: KalshiClient, bet) -> None:
         print(f"  ❌  Order failed ({bet.kalshi_market.ticker}): {exc}")
 
 
+def _in_sharp_range(sharp_prob: float) -> bool:
+    """Return True if sharp_prob falls within any configured AUTO_BET_SHARP_RANGES."""
+    if not config.AUTO_BET_SHARP_RANGES:
+        return True  # empty list = no filter
+    return any(lo <= sharp_prob <= hi for lo, hi in config.AUTO_BET_SHARP_RANGES)
+
+
+def _format_sharp_ranges() -> str:
+    """Format AUTO_BET_SHARP_RANGES for display."""
+    if not config.AUTO_BET_SHARP_RANGES:
+        return "all"
+    return ", ".join(f"{lo*100:.0f}-{hi*100:.0f}%" for lo, hi in config.AUTO_BET_SHARP_RANGES)
+
+
 def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[str, str]) -> int:
     """
     Automatically place bets on qualifying value bets.
 
     A bet qualifies when ALL of the following are true:
-        bet.edge                >= config.AUTO_BET_MIN_EDGE
-        bet.kalshi_implied_prob >= config.AUTO_BET_MIN_KALSHI_PROB
+        bet.edge            >= config.AUTO_BET_MIN_EDGE
+        bet.sharp_true_prob within config.AUTO_BET_SHARP_RANGES
         game not already in the bet ledger (checked via already_bet_tickers)
 
     Returns the number of bets placed.
@@ -350,11 +364,11 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
     for bet in value_bets:
         if bet.edge < config.AUTO_BET_MIN_EDGE:
             continue
-        if bet.kalshi_implied_prob < config.AUTO_BET_MIN_KALSHI_PROB:
+        if not _in_sharp_range(bet.sharp_true_prob):
             continue
         if game_key(bet.kalshi_market.ticker) in already_bet_tickers:
             continue
-        print(f"  [Auto-Bet] Edge {bet.edge * 100:.1f}% · Kalshi {bet.kalshi_implied_prob * 100:.1f}% — qualifying bet:")
+        print(f"  [Auto-Bet] Edge {bet.edge * 100:.1f}% · Kalshi {bet.kalshi_implied_prob * 100:.1f}% · Sharp {bet.sharp_true_prob * 100:.1f}% — qualifying bet:")
         _place_bet(kalshi, bet)
         placed += 1
     return placed
@@ -508,9 +522,9 @@ def main() -> None:
     print(f"║  Bankroll     : ${config.BANKROLL:,.2f}")
     print(f"║  Kelly mult   : {config.KELLY_FRACTION * 100:.0f}% (fractional)")
     if args.auto_bet:
-        print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  Kalshi prob ≥ {config.AUTO_BET_MIN_KALSHI_PROB * 100:.0f}%)")
+        print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  sharp: {_format_sharp_ranges()})")
     if args.auto_bet_loop is not None:
-        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  Kalshi prob ≥ {config.AUTO_BET_MIN_KALSHI_PROB * 100:.0f}%,  interval: {args.auto_bet_loop}s)")
+        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  sharp: {_format_sharp_ranges()},  interval: {args.auto_bet_loop}s)")
     print("╚══════════════════════════════════════════════════════════\n")
 
     _validate_config()

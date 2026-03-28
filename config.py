@@ -52,10 +52,12 @@ KALSHI_SERIES: list[str] = ["KXNBAGAME", "KXNCAAMBGAME", "KXNCAAWBGAME", "KXNHLG
 # ─── Value Bet Thresholds ────────────────────────────────────────────────────
 # Minimum edge (sharp prob − Kalshi prob) to flag a bet.
 # Lower = more alerts but more noise. 0.03–0.05 is a reasonable starting range.
+# This just controls what displays in the value bet table. The edge column has to be
+# greater than or equal to this threshold to be included in the table and considered a value bet.
 MIN_EDGE: float = 0.001
 
 # ─── Bankroll & Sizing ───────────────────────────────────────────────────────
-BANKROLL: float = 22.77
+BANKROLL: float = 15.84
 
 # Fractional Kelly multiplier. Full Kelly (1.0) is mathematically optimal but
 # volatile. Quarter Kelly (0.25) is more conservative and widely recommended.
@@ -65,10 +67,20 @@ KELLY_FRACTION: float = 0.25
 # When --auto-bet is passed, bets are placed automatically on any value bet where
 # BOTH of the following conditions are met:
 #   edge             >= AUTO_BET_MIN_EDGE        (the "Edge" column in the table)
-#   kalshi_implied_prob >= AUTO_BET_MIN_KALSHI_PROB (the "Kalshi Prob" column)
+#   sharp_prob       within AUTO_BET_SHARP_RANGES (see below)
 # Games already in the bet ledger are always skipped.
 AUTO_BET_MIN_EDGE: float = 0.02
-AUTO_BET_MIN_KALSHI_PROB: float = 0.4
+
+# ─── Sharp Probability Ranges ─────────────────────────────────────────────────
+# Only place auto-bets when the sharp probability falls within one of these ranges.
+# Each tuple is (min, max) inclusive.  Bets outside ALL ranges are skipped.
+# Example: [(0.40, 0.59), (0.80, 1.00)] allows the 40-59% and 80-100% buckets
+#          but blocks 0-39% and 60-79%.
+# Set to [] to disable this filter (allow all sharp probs).
+AUTO_BET_SHARP_RANGES: list[tuple[float, float]] = [
+    (0.10, 1.00),
+    # (0.80, 1.00),
+]
 
 # ─── Liquidity Filter ─────────────────────────────────────────────────────────
 # Minimum Kalshi market volume (contracts) to consider a market tradeable.
