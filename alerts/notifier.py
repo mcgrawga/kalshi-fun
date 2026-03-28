@@ -130,11 +130,27 @@ def print_summary(
     n_odds: int,
     n_matched: int,
     n_bets: int,
+    bankroll: float = 0.0,
 ) -> None:
     """Print a one-line scan summary."""
     print(
         f"  Kalshi games:   {n_kalshi // 2:>4}  |  "
         f"Sportsbook games: {n_odds:>4}  |  "
         f"Matched: {n_matched // 2:>4}  |  "
-        f"Value bets: {n_bets:>3}"
+        f"Value bets: {n_bets:>3}  |  "
+        f"Bankroll: ${bankroll:,.2f}"
     )
+
+
+def print_open_bets(open_bets: list) -> None:
+    """Print a compact list of open (unsettled) bets below the summary line."""
+    if not open_bets:
+        return
+    for i, bet in enumerate(open_bets, 1):
+        team = bet["team"]
+        opponent = bet["opponent"] or "???"
+        side = bet["side"]
+        cost = bet["cost"]
+        matchup = f"{team} vs {opponent}"
+        action = f"{team} {side}"
+        print(f"  Open-Bet {i}  |  {matchup}  |  {action}  |  ${cost:.2f}")

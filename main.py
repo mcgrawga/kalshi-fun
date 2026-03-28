@@ -25,9 +25,9 @@ from clients.odds_client import OddsClient
 from engine.normalizer import normalize_all_games
 from engine.matcher import match_markets
 from engine.analyzer import scan_all
-from alerts.notifier import print_opportunities, print_summary
+from alerts.notifier import print_opportunities, print_summary, print_open_bets
 from models.market import KalshiMarket
-from db.bets import init_db, record_bet, get_active_tickers
+from db.bets import init_db, record_bet, get_active_tickers, get_open_bets
 from engine.settler import settle_open_bets
 
 
@@ -163,13 +163,18 @@ def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = 
         o = sport_counts.get(sport, 0)
         print(f"[Match]  {sport}: {m} / {k} Kalshi  |  {o} sportsbook")
 
-    # 6. Find value bets
-    value_bets = scan_all(matched)
+    # 6. Fetch live bankroll
+    bankroll = kalshi.get_balance()
 
-    # 7. Report
-    print_summary(len(kalshi_markets), len(normalized_games), len(matched), len(value_bets))
+    # 7. Find value bets
+    value_bets = scan_all(matched, bankroll=bankroll)
+
+    # 8. Report
+    print_summary(len(kalshi_markets), len(normalized_games), len(matched), len(value_bets), bankroll=bankroll)
     if auto_bet:
         print(f"  [Auto-Bet] ENABLED  |  min edge: {config.AUTO_BET_MIN_EDGE * 100:.1f}%  |  sharp ranges: {_format_sharp_ranges()}")
+    open_bets = get_open_bets()
+    print_open_bets(open_bets)
     print_opportunities(value_bets, already_bet_tickers=already_bet_tickers or {})
 
     return value_bets
@@ -294,6 +299,8 @@ def _countdown(seconds: int) -> None:
 def _place_bet(kalshi: KalshiClient, bet) -> None:
     """Place a single order for `bet` and record it in the DB if filled."""
     ask = bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask
+    sm = bet.sportsbook_market
+    opponent = sm.away_team if bet.yes_team == sm.home_team else sm.home_team
     print(f"  ⏳  Placing: Buy {bet.side} · {bet.yes_team} — {bet.contracts} contract(s) @ ${ask:.2f} · {bet.kalshi_market.ticker}")
     try:
         resp = kalshi.place_order(
@@ -320,6 +327,7 @@ def _place_bet(kalshi: KalshiClient, bet) -> None:
                 sport=bet.kalshi_market.sport_type,
                 side=bet.side,
                 team=bet.yes_team,
+                opponent=opponent,
                 contracts=bet.contracts,
                 fill_count=filled,
                 price=ask,
@@ -519,7 +527,6 @@ def main() -> None:
     print(f"║  Sports       : {', '.join(config.SPORTS)}")
     print(f"║  Kalshi series: {', '.join(config.KALSHI_SERIES)}")
     print(f"║  Min edge     : {config.MIN_EDGE * 100:.1f}%")
-    print(f"║  Bankroll     : ${config.BANKROLL:,.2f}")
     print(f"║  Kelly mult   : {config.KELLY_FRACTION * 100:.0f}% (fractional)")
     if args.auto_bet:
         print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  sharp: {_format_sharp_ranges()})")

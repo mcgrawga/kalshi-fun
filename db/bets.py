@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS bets (
     sport       TEXT    NOT NULL,
     side        TEXT    NOT NULL,
     team        TEXT    NOT NULL,
+    opponent    TEXT    NOT NULL DEFAULT '',
     contracts   INTEGER NOT NULL,
     fill_count  INTEGER NOT NULL DEFAULT 0,
     price       REAL    NOT NULL,
@@ -82,6 +83,11 @@ def init_db() -> None:
     with _conn() as con:
         con.execute(_CREATE_TABLE)
         con.execute(_CREATE_INDEX)
+        # Migration: add opponent column for existing databases.
+        try:
+            con.execute("ALTER TABLE bets ADD COLUMN opponent TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass  # column already exists
 
 
 def record_bet(
@@ -90,6 +96,7 @@ def record_bet(
     sport: str,
     side: str,
     team: str,
+    opponent: str = "",
     contracts: int,
     fill_count: int,
     price: float,
@@ -111,9 +118,9 @@ def record_bet(
         cur = con.execute(
             """
             INSERT INTO bets
-                (placed_at, ticker, sport, side, team, contracts, fill_count,
+                (placed_at, ticker, sport, side, team, opponent, contracts, fill_count,
                  price, cost, edge, sharp_prob, kalshi_prob, game_time, order_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 placed_at,
@@ -121,6 +128,7 @@ def record_bet(
                 sport,
                 side,
                 team,
+                opponent,
                 contracts,
                 fill_count,
                 round(price, 4),

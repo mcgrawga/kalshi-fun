@@ -245,6 +245,11 @@ class KalshiClient:
 
         return self._post("/portfolio/orders", body)
 
+    def get_balance(self) -> float:
+        """Fetch the current cash balance in dollars from the Kalshi portfolio."""
+        data = self._get("/portfolio/balance")
+        return data.get("balance", 0) / 100.0
+
     # ─── Portfolio ────────────────────────────────────────────────────────────
 
     def get_settlements(self, limit: int = 200) -> list[dict]:

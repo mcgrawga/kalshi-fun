@@ -50,7 +50,7 @@ def kelly_fraction(true_prob: float, decimal_odds: float) -> float:
     return max(0.0, (true_prob * b - q) / b)
 
 
-def analyze_match(match: MatchedMarket, min_edge: float) -> list[ValueBet]:
+def analyze_match(match: MatchedMarket, min_edge: float, bankroll: float = 0.0) -> list[ValueBet]:
     """
     Examine one matched market pair and return any value bets found.
 
@@ -87,7 +87,7 @@ def analyze_match(match: MatchedMarket, min_edge: float) -> list[ValueBet]:
         if yes_edge >= min_edge:
             dec_odds = km.yes_decimal_odds
             fk = kelly_fraction(sharp_yes_prob, dec_odds) * config.KELLY_FRACTION
-            n_contracts = max(1, round(fk * config.BANKROLL / km.yes_ask)) if km.yes_ask > 0 else 0
+            n_contracts = max(1, round(fk * bankroll / km.yes_ask)) if km.yes_ask > 0 else 0
             bets.append(
                 ValueBet(
                     kalshi_market=km,
@@ -104,7 +104,7 @@ def analyze_match(match: MatchedMarket, min_edge: float) -> list[ValueBet]:
                     yes_team=yes_team,
                     game_time=sm.commence_time,
                     contracts=n_contracts,
-                    below_minimum_bet=(fk * config.BANKROLL < km.yes_ask),
+                    below_minimum_bet=(fk * bankroll < km.yes_ask),
                 )
             )
 
@@ -115,7 +115,7 @@ def analyze_match(match: MatchedMarket, min_edge: float) -> list[ValueBet]:
         if no_edge >= min_edge:
             dec_odds = km.no_decimal_odds
             fk = kelly_fraction(sharp_no_prob, dec_odds) * config.KELLY_FRACTION
-            n_contracts = max(1, round(fk * config.BANKROLL / km.no_ask)) if km.no_ask > 0 else 0
+            n_contracts = max(1, round(fk * bankroll / km.no_ask)) if km.no_ask > 0 else 0
             bets.append(
                 ValueBet(
                     kalshi_market=km,
@@ -132,14 +132,14 @@ def analyze_match(match: MatchedMarket, min_edge: float) -> list[ValueBet]:
                     yes_team=yes_team,
                     game_time=sm.commence_time,
                     contracts=n_contracts,
-                    below_minimum_bet=(fk * config.BANKROLL < km.no_ask),
+                    below_minimum_bet=(fk * bankroll < km.no_ask),
                 )
             )
 
     return bets
 
 
-def scan_all(matches: list[MatchedMarket]) -> list[ValueBet]:
+def scan_all(matches: list[MatchedMarket], bankroll: float = 0.0) -> list[ValueBet]:
     """
     Scan all matched market pairs for value bets.
 
@@ -150,7 +150,7 @@ def scan_all(matches: list[MatchedMarket]) -> list[ValueBet]:
     # negative edges pass the threshold.
     threshold = -float("inf") if config.MIN_EDGE == 0.0 else config.MIN_EDGE
     for match in matches:
-        all_bets.extend(analyze_match(match, threshold))
+        all_bets.extend(analyze_match(match, threshold, bankroll=bankroll))
 
     # Deduplicate: buying YES on Team A and NO on Team B for the same game are
     # the same economic bet (both pay out if Team A wins). Keep the cheaper one

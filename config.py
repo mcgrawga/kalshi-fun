@@ -57,7 +57,7 @@ KALSHI_SERIES: list[str] = ["KXNBAGAME", "KXNCAAMBGAME", "KXNCAAWBGAME", "KXNHLG
 MIN_EDGE: float = 0.001
 
 # ─── Bankroll & Sizing ───────────────────────────────────────────────────────
-BANKROLL: float = 15.84
+# Bankroll is fetched live from Kalshi's GET /portfolio/balance each scan loop.
 
 # Fractional Kelly multiplier. Full Kelly (1.0) is mathematically optimal but
 # volatile. Quarter Kelly (0.25) is more conservative and widely recommended.
