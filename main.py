@@ -27,8 +27,8 @@ from engine.matcher import match_markets
 from engine.analyzer import scan_all
 from alerts.notifier import print_opportunities, print_summary, print_open_bets
 from models.market import KalshiMarket
-from db.bets import init_db, record_bet, get_active_tickers, get_open_bets
-from engine.settler import settle_open_bets
+from db.bets import init_db, record_bet, get_active_tickers, get_open_bets, record_skipped_bet
+from engine.settler import settle_open_bets, settle_skipped_bets
 
 
 _TICKER_DATE_RE = re.compile(r'-(\d{2})([A-Z]{3})(\d{2})[A-Z0-9]', re.IGNORECASE)
@@ -172,7 +172,7 @@ def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = 
     # 8. Report
     print_summary(len(kalshi_markets), len(normalized_games), len(matched), len(value_bets), bankroll=bankroll)
     if auto_bet:
-        print(f"  [Auto-Bet] ENABLED  |  min edge: {config.AUTO_BET_MIN_EDGE * 100:.1f}%  |  sharp ranges: {_format_sharp_ranges()}")
+        print(f"  [Auto-Bet] ENABLED  |  min edge: {config.AUTO_BET_MIN_EDGE * 100:.1f}%  |  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢  |  sport filters: {len(config.SPORT_STRATEGY)} sport(s)")
     open_bets = get_open_bets()
     print_open_bets(open_bets)
     print_opportunities(value_bets, already_bet_tickers=already_bet_tickers or {})
@@ -237,7 +237,7 @@ def _parse_args() -> argparse.Namespace:
         default=False,
         help=(
             "Automatically place bets on value bets where edge >= AUTO_BET_MIN_EDGE "
-            "and sharp prob within AUTO_BET_SHARP_RANGES (both set in config.py). "
+            "and passing SPORT_STRATEGY filters (both set in config.py). "
             "Games already in the bet ledger are always skipped. "
             "The table and manual prompt still appear after auto-bets are placed."
         ),
@@ -249,7 +249,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Run in continuous unattended loop mode. Automatically places bets using the "
-            "same AUTO_BET_MIN_EDGE and AUTO_BET_SHARP_RANGES thresholds as --auto-bet, "
+            "same AUTO_BET_MIN_EDGE and SPORT_STRATEGY thresholds as --auto-bet, "
             "then waits SECONDS before rescanning. No prompt is shown — a countdown "
             "displays instead. Press Ctrl+C to stop. Cannot be combined with --auto-bet."
         ),
@@ -344,18 +344,25 @@ def _place_bet(kalshi: KalshiClient, bet) -> None:
         print(f"  ❌  Order failed ({bet.kalshi_market.ticker}): {exc}")
 
 
-def _in_sharp_range(sharp_prob: float) -> bool:
-    """Return True if sharp_prob falls within any configured AUTO_BET_SHARP_RANGES."""
-    if not config.AUTO_BET_SHARP_RANGES:
-        return True  # empty list = no filter
-    return any(lo <= sharp_prob <= hi for lo, hi in config.AUTO_BET_SHARP_RANGES)
+def _check_sport_strategy(bet) -> str | None:
+    """Check per-sport strategy filters. Returns a skip reason string, or None if the bet passes."""
+    rules = config.SPORT_STRATEGY.get(bet.kalshi_market.sport_type)
+    if not rules:
+        return None  # no sport-specific rules → allow
 
+    allowed_sides = rules.get("sides")
+    if allowed_sides and bet.side not in allowed_sides:
+        return f"side {bet.side} blocked (allowed: {', '.join(allowed_sides)})"
 
-def _format_sharp_ranges() -> str:
-    """Format AUTO_BET_SHARP_RANGES for display."""
-    if not config.AUTO_BET_SHARP_RANGES:
-        return "all"
-    return ", ".join(f"{lo*100:.0f}-{hi*100:.0f}%" for lo, hi in config.AUTO_BET_SHARP_RANGES)
+    min_sharp = rules.get("min_sharp", 0.0)
+    if bet.sharp_true_prob < min_sharp:
+        return f"sharp {bet.sharp_true_prob*100:.1f}% < min {min_sharp*100:.0f}%"
+
+    max_sharp = rules.get("max_sharp", 1.0)
+    if bet.sharp_true_prob > max_sharp:
+        return f"sharp {bet.sharp_true_prob*100:.1f}% > max {max_sharp*100:.0f}%"
+
+    return None
 
 
 def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[str, str], matched: list) -> int:
@@ -364,8 +371,12 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
 
     A bet qualifies when ALL of the following are true:
         bet.edge            >= config.AUTO_BET_MIN_EDGE
-        bet.sharp_true_prob within config.AUTO_BET_SHARP_RANGES
+        contract price      >= config.AUTO_BET_MIN_PRICE
+        passes per-sport SPORT_STRATEGY filters
         game not already in the bet ledger (checked via already_bet_tickers)
+
+    Bets that pass the global filters but fail the sport strategy filter are
+    recorded in the skipped_bets table for later analysis.
 
     After each placement the bankroll is refreshed from the API and value bets
     are re-sized via scan_all so subsequent bets use the updated cash balance.
@@ -377,10 +388,49 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
     for bet in value_bets:
         if bet.edge < config.AUTO_BET_MIN_EDGE:
             continue
-        if not _in_sharp_range(bet.sharp_true_prob):
+        ask = bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask
+        if ask < config.AUTO_BET_MIN_PRICE:
+            sm = bet.sportsbook_market
+            opponent = sm.away_team if bet.yes_team == sm.home_team else sm.home_team
+            reason = f"price {ask*100:.0f}\u00a2 < min {config.AUTO_BET_MIN_PRICE*100:.0f}\u00a2"
+            record_skipped_bet(
+                ticker=bet.kalshi_market.ticker,
+                sport=bet.kalshi_market.sport_type,
+                side=bet.side,
+                team=bet.yes_team,
+                opponent=opponent,
+                price=ask,
+                edge=bet.edge,
+                sharp_prob=bet.sharp_true_prob,
+                kalshi_prob=bet.kalshi_implied_prob,
+                game_time=bet.game_time,
+                reason=reason,
+            )
+            print(f"  [Auto-Bet] SKIP  {bet.side} · {bet.yes_team} — {reason}")
             continue
-        if game_key(bet.kalshi_market.ticker) in already_bet_tickers:
             continue
+
+        # Per-sport strategy filter
+        skip_reason = _check_sport_strategy(bet)
+        if skip_reason:
+            sm = bet.sportsbook_market
+            opponent = sm.away_team if bet.yes_team == sm.home_team else sm.home_team
+            record_skipped_bet(
+                ticker=bet.kalshi_market.ticker,
+                sport=bet.kalshi_market.sport_type,
+                side=bet.side,
+                team=bet.yes_team,
+                opponent=opponent,
+                price=bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask,
+                edge=bet.edge,
+                sharp_prob=bet.sharp_true_prob,
+                kalshi_prob=bet.kalshi_implied_prob,
+                game_time=bet.game_time,
+                reason=skip_reason,
+            )
+            print(f"  [Auto-Bet] SKIP  {bet.side} · {bet.yes_team} — {skip_reason}")
+            continue
+
         print(f"  [Auto-Bet] Edge {bet.edge * 100:.1f}% · Kalshi {bet.kalshi_implied_prob * 100:.1f}% · Sharp {bet.sharp_true_prob * 100:.1f}% — qualifying bet:")
         _place_bet(kalshi, bet)
         placed += 1
@@ -537,9 +587,9 @@ def main() -> None:
     print(f"║  Min edge     : {config.MIN_EDGE * 100:.1f}%")
     print(f"║  Kelly mult   : {config.KELLY_FRACTION * 100:.0f}% (fractional)")
     if args.auto_bet:
-        print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  sharp: {_format_sharp_ranges()})")
+        print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)})")
     if args.auto_bet_loop is not None:
-        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  sharp: {_format_sharp_ranges()},  interval: {args.auto_bet_loop}s)")
+        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)},  interval: {args.auto_bet_loop}s)")
     print("╚══════════════════════════════════════════════════════════\n")
 
     _validate_config()
@@ -558,6 +608,7 @@ def main() -> None:
 
     while True:
         settle_open_bets(kalshi)
+        settle_skipped_bets(kalshi)
         already_bet: dict[str, str] = get_active_tickers()
         value_bets, matched = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
 

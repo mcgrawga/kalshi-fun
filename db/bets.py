@@ -63,6 +63,26 @@ _CREATE_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_bets_ticker ON bets(ticker);
 """
 
+_CREATE_SKIPPED_TABLE = """
+CREATE TABLE IF NOT EXISTS skipped_bets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    skipped_at  TEXT    NOT NULL,
+    ticker      TEXT    NOT NULL,
+    sport       TEXT    NOT NULL,
+    side        TEXT    NOT NULL,
+    team        TEXT    NOT NULL,
+    opponent    TEXT    NOT NULL DEFAULT '',
+    price       REAL    NOT NULL,
+    edge        REAL    NOT NULL,
+    sharp_prob  REAL    NOT NULL,
+    kalshi_prob REAL    NOT NULL,
+    game_time   TEXT    NOT NULL,
+    reason      TEXT    NOT NULL DEFAULT '',
+    outcome     TEXT,
+    settled_at  TEXT
+);
+"""
+
 
 @contextmanager
 def _conn():
@@ -85,6 +105,7 @@ def init_db() -> None:
     with _conn() as con:
         con.execute(_CREATE_TABLE)
         con.execute(_CREATE_INDEX)
+        con.execute(_CREATE_SKIPPED_TABLE)
         # Migration: add opponent column for existing databases.
         try:
             con.execute("ALTER TABLE bets ADD COLUMN opponent TEXT NOT NULL DEFAULT ''")
@@ -95,6 +116,15 @@ def init_db() -> None:
             con.execute("ALTER TABLE bets ADD COLUMN bankroll_at_bet REAL")
         except Exception:
             pass  # column already exists
+        # Migration: add outcome + settled_at columns to skipped_bets.
+        try:
+            con.execute("ALTER TABLE skipped_bets ADD COLUMN outcome TEXT")
+        except Exception:
+            pass
+        try:
+            con.execute("ALTER TABLE skipped_bets ADD COLUMN settled_at TEXT")
+        except Exception:
+            pass
 
 
 def record_bet(
@@ -151,6 +181,47 @@ def record_bet(
             ),
         )
         return cur.lastrowid
+
+
+def record_skipped_bet(
+    *,
+    ticker: str,
+    sport: str,
+    side: str,
+    team: str,
+    opponent: str = "",
+    price: float,
+    edge: float,
+    sharp_prob: float,
+    kalshi_prob: float,
+    game_time: datetime,
+    reason: str,
+) -> None:
+    """Record a bet that was skipped. Every occurrence is logged (odds may differ across scans)."""
+    skipped_at = datetime.now(timezone.utc).isoformat()
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO skipped_bets
+                (skipped_at, ticker, sport, side, team, opponent, price, edge,
+                 sharp_prob, kalshi_prob, game_time, reason)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                skipped_at,
+                ticker,
+                sport,
+                side,
+                team,
+                opponent,
+                round(price, 4),
+                round(edge, 6),
+                round(sharp_prob, 6),
+                round(kalshi_prob, 6),
+                game_time.isoformat(),
+                reason,
+            ),
+        )
 
 
 def game_key(ticker: str) -> str:
@@ -212,3 +283,29 @@ def all_bets() -> list[sqlite3.Row]:
         return con.execute(
             "SELECT * FROM bets ORDER BY placed_at DESC"
         ).fetchall()
+
+
+def get_unsettled_skipped_bets() -> list[sqlite3.Row]:
+    """Return one row per unique ticker+side that has not yet been settled."""
+    with _conn() as con:
+        return con.execute(
+            "SELECT * FROM skipped_bets WHERE outcome IS NULL "
+            "GROUP BY ticker, side ORDER BY skipped_at ASC"
+        ).fetchall()
+
+
+def settle_skipped_bet(ticker: str, side: str, outcome: str) -> None:
+    """
+    Mark ALL skipped bet rows for a given ticker+side as settled.
+
+    Multiple rows may exist for the same ticker+side (recorded at different
+    odds across scan cycles).  The outcome is the same for all of them.
+
+    outcome: "would_have_won", "would_have_lost", or "void"
+    """
+    settled_at = datetime.now(timezone.utc).isoformat()
+    with _conn() as con:
+        con.execute(
+            "UPDATE skipped_bets SET outcome = ?, settled_at = ? WHERE ticker = ? AND side = ? AND outcome IS NULL",
+            (outcome, settled_at, ticker, side),
+        )

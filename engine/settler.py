@@ -27,7 +27,7 @@ P&L formulas
 """
 
 from clients.kalshi_client import KalshiClient
-from db.bets import get_open_bets, settle_bet
+from db.bets import get_open_bets, settle_bet, get_unsettled_skipped_bets, settle_skipped_bet
 
 
 def settle_open_bets(kalshi: KalshiClient) -> None:
@@ -174,3 +174,45 @@ def settle_open_bets(kalshi: KalshiClient) -> None:
         print(f"[Settle] {resolved} bet(s) settled.\n")
     else:
         print(f"[Settle] No new settlements found.\n")
+
+
+def settle_skipped_bets(kalshi: KalshiClient) -> None:
+    """
+    Resolve unsettled skipped bets by checking the Kalshi market result.
+
+    Since no money was placed, there's no P&L — we just record whether the
+    skipped bet *would have* won or lost.  This lets you query:
+        SELECT reason, outcome, COUNT(*) FROM skipped_bets GROUP BY reason, outcome
+    to evaluate whether your filters are saving you money.
+
+    Uses GET /markets/{ticker} to check the market's result field.
+    """
+    pending = get_unsettled_skipped_bets()
+    if not pending:
+        return
+
+    resolved = 0
+
+    for skip in pending:
+        ticker = skip["ticker"]
+        side = skip["side"].upper()
+
+        try:
+            market = kalshi.get_market(ticker)
+        except Exception:
+            # Market not found / API error — skip for now, retry next cycle
+            continue
+
+        market_result = (market.get("result") or "").lower()
+        if market_result not in ("yes", "no", "void"):
+            continue  # not yet resolved
+
+        if market_result == "void":
+            outcome = "void"
+        else:
+            won = (side == "YES" and market_result == "yes") or \
+                  (side == "NO"  and market_result == "no")
+            outcome = "would_have_won" if won else "would_have_lost"
+
+        settle_skipped_bet(ticker, side, outcome)
+        resolved += 1

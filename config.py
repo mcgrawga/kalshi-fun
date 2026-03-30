@@ -67,20 +67,31 @@ KELLY_FRACTION: float = 0.25
 # When --auto-bet is passed, bets are placed automatically on any value bet where
 # BOTH of the following conditions are met:
 #   edge             >= AUTO_BET_MIN_EDGE        (the "Edge" column in the table)
-#   sharp_prob       within AUTO_BET_SHARP_RANGES (see below)
+#   passes SPORT_STRATEGY filters                (per-sport side/sharp rules)
 # Games already in the bet ledger are always skipped.
 AUTO_BET_MIN_EDGE: float = 0.02
 
-# ─── Sharp Probability Ranges ─────────────────────────────────────────────────
-# Only place auto-bets when the sharp probability falls within one of these ranges.
-# Each tuple is (min, max) inclusive.  Bets outside ALL ranges are skipped.
-# Example: [(0.40, 0.59), (0.80, 1.00)] allows the 40-59% and 80-100% buckets
-#          but blocks 0-39% and 60-79%.
-# Set to [] to disable this filter (allow all sharp probs).
-AUTO_BET_SHARP_RANGES: list[tuple[float, float]] = [
-    (0.10, 1.00),
-    # (0.80, 1.00),
-]
+# Minimum contract price (ask) to auto-bet.  Cheap contracts (longshots or
+# games where the outcome is basically decided) have terrible historical ROI.
+# 0.40 = skip anything under 40¢.  Set to 0.0 to disable.
+AUTO_BET_MIN_PRICE: float = 0.40
+
+# ─── Per-Sport Strategy Filters ───────────────────────────────────────────────
+# Fine-grained auto-bet rules per sport. Each sport key maps to a dict with
+# optional filters.  A bet must pass ALL filters to be placed.  Sports not
+# listed here have no extra restrictions (only the global filters above apply).
+#
+# Available keys per sport:
+#   sides      — list[str]  Only allow these sides (e.g. ["NO"]).  Default: both.
+#   min_sharp  — float      Minimum sharp probability.  Default: 0.0
+#   max_sharp  — float      Maximum sharp probability.  Default: 1.0
+SPORT_STRATEGY: dict[str, dict] = {
+    "icehockey_nhl":      {"sides": ["NO"]},
+    "basketball_nba":     {"sides": ["NO"],  "max_sharp": 0.50},
+    "baseball_mlb":       {"min_sharp": 0.50},
+    "basketball_ncaab":   {"min_sharp": 0.50},
+    "basketball_wncaab":  {"sides": ["YES"], "min_sharp": 0.50},
+}
 
 # ─── Liquidity Filter ─────────────────────────────────────────────────────────
 # Minimum Kalshi market volume (contracts) to consider a market tradeable.
