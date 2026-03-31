@@ -365,7 +365,7 @@ def _check_sport_strategy(bet) -> str | None:
     return None
 
 
-def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[str, str], matched: list) -> int:
+def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[str, str]) -> int:
     """
     Automatically place bets on qualifying value bets.
 
@@ -408,7 +408,6 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
             )
             print(f"  [Auto-Bet] SKIP  {bet.side} · {bet.yes_team} — {reason}")
             continue
-            continue
 
         # Per-sport strategy filter
         skip_reason = _check_sport_strategy(bet)
@@ -434,9 +433,6 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
         print(f"  [Auto-Bet] Edge {bet.edge * 100:.1f}% · Kalshi {bet.kalshi_implied_prob * 100:.1f}% · Sharp {bet.sharp_true_prob * 100:.1f}% — qualifying bet:")
         _place_bet(kalshi, bet)
         placed += 1
-        # Refresh bankroll and re-size remaining bets against updated balance.
-        updated_bankroll = kalshi.get_balance()
-        value_bets = scan_all(matched, bankroll=updated_bankroll)
     return placed
 
 
@@ -614,7 +610,7 @@ def main() -> None:
 
         # Auto-bet qualifying rows before showing the table
         if do_auto_bet and value_bets:
-            n_placed = _auto_bet(kalshi, value_bets, already_bet, matched)
+            n_placed = _auto_bet(kalshi, value_bets, already_bet)
             if n_placed:
                 time.sleep(1)
                 # Refresh so the table renders with green arrows on auto-bet rows

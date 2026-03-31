@@ -155,6 +155,8 @@ def scan_all(matches: list[MatchedMarket], bankroll: float = 0.0) -> list[ValueB
     # Deduplicate: buying YES on Team A and NO on Team B for the same game are
     # the same economic bet (both pay out if Team A wins). Keep the cheaper one
     # (lower ask price = same $1 payout for less money = better value).
+    #
+    # Pass 1 — sportsbook identity: (home, away, time, winning_team)
     seen: dict[tuple, ValueBet] = {}
     for bet in all_bets:
         sm = bet.sportsbook_market
@@ -172,4 +174,22 @@ def scan_all(matches: list[MatchedMarket], bankroll: float = 0.0) -> list[ValueB
             if this_ask < existing_ask:
                 seen[key] = bet
 
-    return sorted(seen.values(), key=lambda b: b.edge, reverse=True)
+    # Pass 2 — Kalshi game key: both tickers for the same game share the same
+    # game segment (e.g. KXMLBGAME-26MAR302010BOSHOU).  This catches duplicates
+    # even if the sportsbook-based dedup missed due to matching quirks.
+    deduped: dict[tuple, ValueBet] = {}
+    for bet in seen.values():
+        gk = bet.kalshi_market.ticker.rsplit("-", 1)[0]
+        key = (gk, bet.matched_team)
+        if key not in deduped:
+            deduped[key] = bet
+        else:
+            existing = deduped[key]
+            existing_ask = (existing.kalshi_market.yes_ask if existing.side == "YES"
+                            else existing.kalshi_market.no_ask)
+            this_ask = (bet.kalshi_market.yes_ask if bet.side == "YES"
+                        else bet.kalshi_market.no_ask)
+            if this_ask < existing_ask:
+                deduped[key] = bet
+
+    return sorted(deduped.values(), key=lambda b: b.edge, reverse=True)
