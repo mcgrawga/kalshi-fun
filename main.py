@@ -386,6 +386,9 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
     from db.bets import game_key
     placed = 0
     for bet in value_bets:
+        gk = game_key(bet.kalshi_market.ticker)
+        if gk in already_bet_tickers:
+            continue
         if bet.edge < config.AUTO_BET_MIN_EDGE:
             continue
         ask = bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask
@@ -433,6 +436,8 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
         print(f"  [Auto-Bet] Edge {bet.edge * 100:.1f}% · Kalshi {bet.kalshi_implied_prob * 100:.1f}% · Sharp {bet.sharp_true_prob * 100:.1f}% — qualifying bet:")
         _place_bet(kalshi, bet)
         placed += 1
+        # Mark this game as bet so we don't bet the other side in the same pass
+        already_bet_tickers[gk] = bet.kalshi_market.ticker
     return placed
 
 
