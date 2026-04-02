@@ -164,7 +164,12 @@ def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = 
         print(f"[Match]  {sport}: {m} / {k} Kalshi  |  {o} sportsbook")
 
     # 6. Fetch live bankroll
-    bankroll = kalshi.get_balance()
+    try:
+        bankroll = kalshi.get_balance()
+        run_scan._last_bankroll = bankroll
+    except Exception as exc:
+        bankroll = getattr(run_scan, "_last_bankroll", 0.0)
+        print(f"[Kalshi] ⚠ balance fetch failed ({exc}), using ${bankroll:.2f}")
 
     # 7. Find value bets
     value_bets = scan_all(matched, bankroll=bankroll)
