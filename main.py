@@ -117,7 +117,9 @@ def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = 
     print(f"[Kalshi] {len(kalshi_markets) // 2} games total on {effective_date.strftime('%b %-d')}.")
 
     # 2. Fetch sportsbook odds — all sharp + live books in one request per sport
-    raw_games = odds.get_all_sports_odds()
+    #    Pass the target date so the free /events pre-check can skip sports
+    #    with zero games, saving paid quota credits.
+    raw_games = odds.get_all_sports_odds(target_date=effective_date)
 
     # 3. Remove vig → get sharp true probabilities.
     #    Pass now_utc so normalize_all_games picks the right book per game:
@@ -215,9 +217,9 @@ def _parse_args() -> argparse.Namespace:
             "  python main.py --auto-bet             scan and auto-bet qualifying games\n"
             "  python main.py --date tomorrow --auto-bet\n"
             "                                        auto-bet tomorrow's qualifying games\n"
-            "  python main.py --auto-bet-loop 60     auto-bet loop, rescan every 60s\n"
-            "  python main.py --date tomorrow --auto-bet-loop 120\n"
-            "                                        loop tomorrow's games every 120s\n"
+            "  python main.py --auto-bet-loop 5      auto-bet loop, rescan every 5 min\n"
+            "  python main.py --date tomorrow --auto-bet-loop 10\n"
+            "                                        loop tomorrow's games every 10 min\n"
             "\n"
             "interactive prompt (after scan):\n"
             "  1 3 5   place bets on games #1, #3, and #5\n"
@@ -250,12 +252,12 @@ def _parse_args() -> argparse.Namespace:
     mode.add_argument(
         "--auto-bet-loop",
         type=int,
-        metavar="SECONDS",
+        metavar="MINUTES",
         default=None,
         help=(
             "Run in continuous unattended loop mode. Automatically places bets using the "
             "same AUTO_BET_MIN_EDGE and SPORT_STRATEGY thresholds as --auto-bet, "
-            "then waits SECONDS before rescanning. No prompt is shown — a countdown "
+            "then waits MINUTES before rescanning. No prompt is shown — a countdown "
             "displays instead. Press Ctrl+C to stop. Cannot be combined with --auto-bet."
         ),
     )
@@ -290,10 +292,11 @@ def _resolve_date(raw: str | None) -> date | None:
 
 
 def _countdown(seconds: int) -> None:
-    """Print a live countdown on a single overwriting line, then clear it."""
+    """Print a live countdown in M:SS format on a single overwriting line."""
     try:
         for remaining in range(seconds, 0, -1):
-            print(f"  ⏱  Next scan in {remaining}s...  ", end="\r", flush=True)
+            mins, secs = divmod(remaining, 60)
+            print(f"  ⏱  Next scan in {mins}:{secs:02d}...  ", end="\r", flush=True)
             time.sleep(1)
         print(" " * 40, end="\r", flush=True)  # clear the line
     except KeyboardInterrupt:
@@ -595,7 +598,7 @@ def main() -> None:
     if args.auto_bet:
         print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)})")
     if args.auto_bet_loop is not None:
-        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)},  interval: {args.auto_bet_loop}s)")
+        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)},  interval: {args.auto_bet_loop}m)")
     print("╚══════════════════════════════════════════════════════════\n")
 
     _validate_config()
@@ -623,15 +626,16 @@ def main() -> None:
             n_placed = _auto_bet(kalshi, value_bets, already_bet)
             if n_placed:
                 time.sleep(1)
-                # Refresh so the table renders with green arrows on auto-bet rows
+                # Re-render the table with green arrows on the just-placed rows
+                # instead of a full rescan (saves 7 paid quota credits).
                 already_bet = get_active_tickers()
-                value_bets, matched = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
+                print_opportunities(value_bets, already_bet_tickers=already_bet)
 
         # ── Loop mode: countdown then rescan, no prompt ────────────────────
         if args.auto_bet_loop is not None:
             if not value_bets:
                 print("  No value bets found.")
-            _countdown(args.auto_bet_loop)
+            _countdown(args.auto_bet_loop * 60)
             continue
 
         # ── Interactive mode ───────────────────────────────────────────────
