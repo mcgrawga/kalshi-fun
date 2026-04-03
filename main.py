@@ -10,7 +10,7 @@ Usage
 -----
     python main.py                        # scan today's games
     python main.py --auto-bet             # scan and auto-bet qualifying games
-    python main.py --auto-bet-loop 5      # auto-bet loop, rescan every 5 min
+    python main.py --auto-bet-loop-minutes 5  # auto-bet loop, rescan every 5 min
 """
 
 import argparse
@@ -214,7 +214,7 @@ def _parse_args() -> argparse.Namespace:
             "examples:\n"
             "  python main.py                        scan today's games\n"
             "  python main.py --auto-bet             scan and auto-bet qualifying games\n"
-            "  python main.py --auto-bet-loop 5      auto-bet loop, rescan every 5 min\n"
+            "  python main.py --auto-bet-loop-minutes 5  auto-bet loop, rescan every 5 min\n"
             "\n"
             "interactive prompt (after scan):\n"
             "  1 3 5   place bets on games #1, #3, and #5\n"
@@ -235,7 +235,7 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     mode.add_argument(
-        "--auto-bet-loop",
+        "--auto-bet-loop-minutes",
         type=int,
         metavar="MINUTES",
         default=None,
@@ -566,8 +566,8 @@ def main() -> None:
     print(f"║  Kelly mult   : {config.KELLY_FRACTION * 100:.0f}% (fractional)")
     if args.auto_bet:
         print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)})")
-    if args.auto_bet_loop is not None:
-        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)},  interval: {args.auto_bet_loop}m)")
+    if args.auto_bet_loop_minutes is not None:
+        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)},  interval: {args.auto_bet_loop_minutes}m)")
     print("╚══════════════════════════════════════════════════════════\n")
 
     _validate_config()
@@ -581,8 +581,8 @@ def main() -> None:
         return
 
     # In loop mode, auto_bet behaviour is always active
-    do_auto_bet = args.auto_bet or (args.auto_bet_loop is not None)
-    is_loop = args.auto_bet_loop is not None
+    do_auto_bet = args.auto_bet or (args.auto_bet_loop_minutes is not None)
+    is_loop = args.auto_bet_loop_minutes is not None
 
     while True:
         settle_open_bets(kalshi)
@@ -601,10 +601,10 @@ def main() -> None:
                 print_opportunities(value_bets, already_bet_tickers=already_bet)
 
         # ── Loop mode: countdown then rescan, no prompt ────────────────────
-        if args.auto_bet_loop is not None:
+        if args.auto_bet_loop_minutes is not None:
             if not value_bets:
                 print("  No value bets found.")
-            _countdown(args.auto_bet_loop * 60)
+            _countdown(args.auto_bet_loop_minutes * 60)
             continue
 
         # ── Interactive mode ───────────────────────────────────────────────
