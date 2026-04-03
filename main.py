@@ -4,19 +4,20 @@ Kalshi Value Bet Scanner
 Polls Kalshi and The Odds API, normalizes odds to vig-removed probabilities,
 fuzzy-matches markets across the two platforms, and flags Kalshi markets where
 the sharp book's implied probability exceeds Kalshi's ask-implied probability
-by at least MIN_EDGE.
+by at least MIN_EDGE.  Always scans today's games.
 
 Usage
 -----
-    python main.py                     # scan all upcoming games
-    python main.py --date tomorrow     # only tomorrow's games
-    python main.py --date 2026-03-14   # specific date
+    python main.py                        # scan today's games
+    python main.py --auto-bet             # scan and auto-bet qualifying games
+    python main.py --auto-bet-loop 5      # auto-bet loop, rescan every 5 min
 """
 
 import argparse
+import json
+import re
 import sys
 import time
-import re
 from datetime import date, datetime, timedelta, timezone
 
 import config
@@ -87,20 +88,20 @@ def _parse_kalshi_market(raw: dict) -> KalshiMarket:
     )
 
 
-def run_scan(kalshi: KalshiClient, odds: OddsClient, target_date: date | None = None, debug: bool = True, already_bet_tickers: dict[str, str] | None = None, auto_bet: bool = False, auto_loop: bool = False) -> tuple[list, list]:
-    """Execute one full scan cycle. Returns (value_bets, matched_markets)."""
+def run_scan(kalshi: KalshiClient, odds: OddsClient, debug: bool = True, already_bet_tickers: dict[str, str] | None = None, auto_bet: bool = False, auto_loop: bool = False) -> tuple[list, list]:
+    """Execute one full scan cycle for today's games. Returns (value_bets, matched_markets)."""
     ts = datetime.now().strftime("%H:%M:%S")
-    date_label = target_date.strftime("%a %b %-d") if target_date else "all upcoming"
+    effective_date = date.today()
+    date_label = effective_date.strftime("%a %b %-d")
     print(f"\n[{ts}] ── Scan  {date_label} ─────────────────────────────────")
 
     # 1. Fetch Kalshi sports markets
     raw_kalshi = kalshi.get_sports_markets()
     kalshi_markets = [_parse_kalshi_market(m) for m in raw_kalshi]
 
-    # Filter Kalshi markets to the target date using the game date parsed
+    # Filter Kalshi markets to today using the game date parsed
     # directly from the ticker (e.g. 26MAR14 → 2026-03-14). This is exact
     # and avoids any time-offset heuristics.
-    effective_date = target_date or date.today()
     kalshi_markets = [
         km for km in kalshi_markets
         if km.game_date == effective_date
@@ -212,29 +213,13 @@ def _parse_args() -> argparse.Namespace:
         epilog=(
             "examples:\n"
             "  python main.py                        scan today's games\n"
-            "  python main.py --date tomorrow        scan tomorrow's games\n"
-            "  python main.py --date 2026-03-20      scan a specific date\n"
             "  python main.py --auto-bet             scan and auto-bet qualifying games\n"
-            "  python main.py --date tomorrow --auto-bet\n"
-            "                                        auto-bet tomorrow's qualifying games\n"
             "  python main.py --auto-bet-loop 5      auto-bet loop, rescan every 5 min\n"
-            "  python main.py --date tomorrow --auto-bet-loop 10\n"
-            "                                        loop tomorrow's games every 10 min\n"
             "\n"
             "interactive prompt (after scan):\n"
             "  1 3 5   place bets on games #1, #3, and #5\n"
             "  r       rescan (re-fetches odds and Kalshi prices)\n"
             "  b       exit\n"
-        ),
-    )
-    p.add_argument(
-        "--date",
-        metavar="DATE",
-        default=None,
-        help=(
-            "Date to scan. Accepts 'today', 'tomorrow', or YYYY-MM-DD. "
-            "Defaults to today. Games are matched by exact calendar date in your "
-            "local timezone — there is no rolling time window."
         ),
     )
     mode = p.add_mutually_exclusive_group()
@@ -273,22 +258,6 @@ def _parse_args() -> argparse.Namespace:
     )
     return p.parse_args()
 
-
-
-def _resolve_date(raw: str | None) -> date | None:
-    """Parse the --date argument into a date object, or None for 'all upcoming'."""
-    if raw is None:
-        return None
-    today = date.today()
-    if raw.lower() == "today":
-        return today
-    if raw.lower() == "tomorrow":
-        return today + timedelta(days=1)
-    try:
-        return date.fromisoformat(raw)
-    except ValueError:
-        print(f"[ERROR] --date must be 'today', 'tomorrow', or YYYY-MM-DD (got '{raw}')")
-        sys.exit(1)
 
 
 def _countdown(seconds: int) -> None:
@@ -581,8 +550,8 @@ def _manage_mappings_mode() -> None:
 
 def main() -> None:
     args = _parse_args()
-    target_date = _resolve_date(args.date)
-    date_label = target_date.strftime("%a %b %-d, %Y") if target_date else "all upcoming games"
+    today = date.today()
+    date_label = today.strftime("%a %b %-d, %Y")
 
     print("╔══════════════════════════════════════════════════════════")
     print("║          Kalshi Value Bet Scanner                        ")
@@ -619,7 +588,7 @@ def main() -> None:
         settle_open_bets(kalshi)
         settle_skipped_bets(kalshi)
         already_bet: dict[str, str] = get_active_tickers()
-        value_bets, matched = run_scan(kalshi, odds, target_date, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
+        value_bets, matched = run_scan(kalshi, odds, already_bet_tickers=already_bet, auto_bet=do_auto_bet, auto_loop=is_loop)
 
         # Auto-bet qualifying rows before showing the table
         if do_auto_bet and value_bets:
