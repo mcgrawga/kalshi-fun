@@ -11,6 +11,7 @@ Usage
     python main.py                        # scan today's games
     python main.py --auto-bet             # scan and auto-bet qualifying games
     python main.py --auto-bet-loop-minutes 5  # auto-bet loop, rescan every 5 min
+    python main.py --auto-bet-loop-minutes 5 --run-time-minutes 60  # loop for 1 hour then exit
 """
 
 import argparse
@@ -19,6 +20,7 @@ import re
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import config
 from clients.kalshi_client import KalshiClient
@@ -215,6 +217,7 @@ def _parse_args() -> argparse.Namespace:
             "  python main.py                        scan today's games\n"
             "  python main.py --auto-bet             scan and auto-bet qualifying games\n"
             "  python main.py --auto-bet-loop-minutes 5  auto-bet loop, rescan every 5 min\n"
+            "  python main.py --auto-bet-loop-minutes 5 --run-time-minutes 60  loop for 1 hour\n"
             "\n"
             "interactive prompt (after scan):\n"
             "  1 3 5   place bets on games #1, #3, and #5\n"
@@ -254,6 +257,17 @@ def _parse_args() -> argparse.Namespace:
             "Review and manage team-name mappings. Runs one scan, then shows all "
             "mapping entries per sport and lets you add/remove entries interactively. "
             "No bets are placed in this mode."
+        ),
+    )
+    p.add_argument(
+        "--run-time-minutes",
+        type=int,
+        metavar="MINUTES",
+        default=None,
+        help=(
+            "Maximum total minutes the app should run before exiting. "
+            "Only valid with --auto-bet-loop-minutes. The app finishes its "
+            "current scan iteration, then exits if the deadline has passed."
         ),
     )
     return p.parse_args()
@@ -568,6 +582,18 @@ def main() -> None:
         print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)})")
     if args.auto_bet_loop_minutes is not None:
         print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)},  interval: {args.auto_bet_loop_minutes}m)")
+
+    # ── Run-time cap setup ─────────────────────────────────────────────
+    _CST = ZoneInfo("America/Chicago")
+    start_time = time.monotonic()
+    start_dt = datetime.now(_CST)
+    deadline_dt = None
+    if args.run_time_minutes is not None:
+        if args.auto_bet_loop_minutes is None:
+            print("[ERROR] --run-time-minutes requires --auto-bet-loop-minutes")
+            sys.exit(1)
+        deadline_dt = start_dt + timedelta(minutes=args.run_time_minutes)
+
     print("╚══════════════════════════════════════════════════════════\n")
 
     _validate_config()
@@ -583,6 +609,8 @@ def main() -> None:
     # In loop mode, auto_bet behaviour is always active
     do_auto_bet = args.auto_bet or (args.auto_bet_loop_minutes is not None)
     is_loop = args.auto_bet_loop_minutes is not None
+
+    schedule_info = (start_dt, deadline_dt, args.run_time_minutes, _CST) if deadline_dt is not None else None
 
     while True:
         settle_open_bets(kalshi)
@@ -604,6 +632,17 @@ def main() -> None:
         if args.auto_bet_loop_minutes is not None:
             if not value_bets:
                 print("  No value bets found.")
+            # Check run-time deadline before sleeping
+            if deadline_dt is not None:
+                elapsed = time.monotonic() - start_time
+                if elapsed >= args.run_time_minutes * 60:
+                    now_ct = datetime.now(_CST).strftime('%I:%M %p CT')
+                    print(f"\n  ⏰  Run-time limit reached ({args.run_time_minutes}m). Exiting at {now_ct}.")
+                    return
+            if schedule_info is not None:
+                _start_dt, _deadline_dt, _run_minutes, _cst = schedule_info
+                _now_ct = datetime.now(_cst)
+                print(f"  \U0001F550  Started: {_start_dt.strftime('%I:%M %p CT')}  |  Now: {_now_ct.strftime('%I:%M %p CT')}  |  Ends: {_deadline_dt.strftime('%I:%M %p CT')}  ({_run_minutes}m)")
             _countdown(args.auto_bet_loop_minutes * 60)
             continue
 
