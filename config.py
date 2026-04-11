@@ -86,7 +86,7 @@ AUTO_BET_MIN_PRICE: float = 0.40
 #   min_sharp  — float      Minimum sharp probability.  Default: 0.0
 #   max_sharp  — float      Maximum sharp probability.  Default: 1.0
 SPORT_STRATEGY: dict[str, dict] = {
-    "icehockey_nhl":      {"sides": ["NO"]},
+    "icehockey_nhl":      {"sides": ["NO"], "min_sharp": 0.50},
     "basketball_nba":     {"sides": ["NO"],  "max_sharp": 0.50},
     "baseball_mlb":       {"min_sharp": 0.50},
     "basketball_ncaab":   {"min_sharp": 0.50},

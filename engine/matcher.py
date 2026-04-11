@@ -303,6 +303,7 @@ def match_markets(
     _diag_no_parse = 0
     _diag_no_time_eligible = 0
     _diag_no_fuzzy = 0
+    _diag_not_on_sb = 0  # both names resolved via aliases but game not on sportsbook
     _diag_tier1 = 0
     _diag_tier2 = 0
     _diag_tier3_accept = 0
@@ -400,11 +401,21 @@ def match_markets(
                     best_score, best_match, best_yes_is_home = score, om, False
 
         if best_match is None:
-            _diag_no_fuzzy += 1
-            if debug:
-                _debug_misses.append(_build_debug_miss(
-                    km, yes_canonical, other_canonical, eligible
-                ))
+            # Check if both names resolved through the alias table — if so
+            # the game simply isn't on the sportsbook (not a name problem).
+            _aliases = ALIASES_BY_SPORT.get(sport, {})
+            _yes_aliased = yes_canonical.lower() != yes_team_raw.strip().lower() or yes_team_raw.strip().lower() in _aliases
+            _other_aliased = (other_canonical is not None and
+                             (other_canonical.lower() != (other_team_raw or "").strip().lower()
+                              or (other_team_raw or "").strip().lower() in _aliases))
+            if _yes_aliased and _other_aliased:
+                _diag_not_on_sb += 1
+            else:
+                _diag_no_fuzzy += 1
+                if debug:
+                    _debug_misses.append(_build_debug_miss(
+                        km, yes_canonical, other_canonical, eligible
+                    ))
             continue
 
         # Determine which tier this falls into
@@ -455,11 +466,19 @@ def match_markets(
             else:
                 _diag_tier3_skip += 1
         else:
-            _diag_no_fuzzy += 1
-            if debug:
-                _debug_misses.append(_build_debug_miss(
-                    km, yes_canonical, other_canonical, eligible
-                ))
+            _aliases = ALIASES_BY_SPORT.get(sport, {})
+            _yes_aliased = yes_canonical.lower() != yes_team_raw.strip().lower() or yes_team_raw.strip().lower() in _aliases
+            _other_aliased = (other_canonical is not None and
+                             (other_canonical.lower() != (other_team_raw or "").strip().lower()
+                              or (other_team_raw or "").strip().lower() in _aliases))
+            if _yes_aliased and _other_aliased:
+                _diag_not_on_sb += 1
+            else:
+                _diag_no_fuzzy += 1
+                if debug:
+                    _debug_misses.append(_build_debug_miss(
+                        km, yes_canonical, other_canonical, eligible
+                    ))
 
     # ── Summary ───────────────────────────────────────────────────────────────
     n_kalshi_games = len(kalshi_markets) // 2
@@ -481,6 +500,7 @@ def match_markets(
     print(
         f"[Matcher] Unmatched breakdown (contracts): "
         f"wrong date/no odds={_diag_no_time_eligible}  "
+        f"not on sportsbook={_diag_not_on_sb}  "
         f"name mismatch={_diag_no_fuzzy}  "
         f"unparseable={_diag_no_parse}"
     )

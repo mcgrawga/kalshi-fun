@@ -19,4 +19,5 @@ ALIASES_BY_SPORT: dict[str, dict[str, str]] = {
     "basketball_wncaab":   wncaab.ALIASES,
     "rugbyleague_nrl":     nrl.ALIASES,
     "soccer_usa_mls":      soccer_mls.ALIASES,
+    "baseball_mlb":        mlb.ALIASES,
 }
