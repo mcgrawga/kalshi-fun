@@ -74,7 +74,7 @@ AUTO_BET_MIN_EDGE: float = 0.02
 # Minimum contract price (ask) to auto-bet.  Cheap contracts (longshots or
 # games where the outcome is basically decided) have terrible historical ROI.
 # 0.40 = skip anything under 40¢.  Set to 0.0 to disable.
-AUTO_BET_MIN_PRICE: float = 0.40
+AUTO_BET_MIN_PRICE: float = 0.20
 
 # ─── Per-Sport Strategy Filters ───────────────────────────────────────────────
 # Fine-grained auto-bet rules per sport. Each sport key maps to a dict with
@@ -86,11 +86,11 @@ AUTO_BET_MIN_PRICE: float = 0.40
 #   min_sharp  — float      Minimum sharp probability.  Default: 0.0
 #   max_sharp  — float      Maximum sharp probability.  Default: 1.0
 SPORT_STRATEGY: dict[str, dict] = {
-    "icehockey_nhl":      {"sides": ["NO"], "min_sharp": 0.50},
-    "basketball_nba":     {"sides": ["NO"],  "max_sharp": 0.50},
-    "baseball_mlb":       {"min_sharp": 0.50},
-    "basketball_ncaab":   {"min_sharp": 0.50},
-    "basketball_wncaab":  {"sides": ["YES"], "min_sharp": 0.50},
+    # "icehockey_nhl":      {"sides": ["NO"], "min_sharp": 0.50},
+    # "basketball_nba":     {"sides": ["NO"],  "max_sharp": 0.50},
+    # "baseball_mlb":       {"min_sharp": 0.60},
+    # "basketball_ncaab":   {"min_sharp": 0.50},
+    # "basketball_wncaab":  {"sides": ["YES"], "min_sharp": 0.50},
 }
 
 # ─── Liquidity Filter ─────────────────────────────────────────────────────────
