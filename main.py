@@ -15,7 +15,6 @@ Usage
 """
 
 import argparse
-import json
 import re
 import sys
 import time
@@ -182,7 +181,7 @@ def run_scan(kalshi: KalshiClient, odds: OddsClient, debug: bool = True, already
     # 8. Report
     print_summary(len(kalshi_markets), len(normalized_games), len(matched), len(value_bets), bankroll=bankroll)
     if auto_bet:
-        print(f"  [Auto-Bet] ENABLED  |  min edge: {config.AUTO_BET_MIN_EDGE * 100:.1f}%  |  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢  |  sport filters: {len(config.SPORT_STRATEGY)} sport(s)")
+        print(f"  [Auto-Bet] ENABLED  |  edge: {config.AUTO_BET_MIN_EDGE * 100:.1f}%–{config.AUTO_BET_MAX_EDGE * 100:.1f}%  |  min sharp: {config.AUTO_BET_MIN_SHARP*100:.0f}%  |  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢  |  sport filters: {len(config.SPORT_STRATEGY)} sport(s)")
     open_bets = get_open_bets()
     print_open_bets(open_bets)
     print_opportunities(value_bets, already_bet_tickers=already_bet_tickers or {})
@@ -362,6 +361,8 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
 
     A bet qualifies when ALL of the following are true:
         bet.edge            >= config.AUTO_BET_MIN_EDGE
+        bet.edge            <= config.AUTO_BET_MAX_EDGE
+        sharp probability   >= config.AUTO_BET_MIN_SHARP
         contract price      >= config.AUTO_BET_MIN_PRICE
         passes per-sport SPORT_STRATEGY filters
         game not already in the bet ledger (checked via already_bet_tickers)
@@ -381,6 +382,44 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
         if gk in already_bet_tickers:
             continue
         if bet.edge < config.AUTO_BET_MIN_EDGE:
+            continue
+        if bet.edge > config.AUTO_BET_MAX_EDGE:
+            sm = bet.sportsbook_market
+            opponent = sm.away_team if bet.yes_team == sm.home_team else sm.home_team
+            reason = f"edge {bet.edge*100:.1f}% > max {config.AUTO_BET_MAX_EDGE*100:.1f}%"
+            record_skipped_bet(
+                ticker=bet.kalshi_market.ticker,
+                sport=bet.kalshi_market.sport_type,
+                side=bet.side,
+                team=bet.yes_team,
+                opponent=opponent,
+                price=bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask,
+                edge=bet.edge,
+                sharp_prob=bet.sharp_true_prob,
+                kalshi_prob=bet.kalshi_implied_prob,
+                game_time=bet.game_time,
+                reason=reason,
+            )
+            print(f"  [Auto-Bet] SKIP  {bet.side} · {bet.yes_team} — {reason}")
+            continue
+        if bet.sharp_true_prob < config.AUTO_BET_MIN_SHARP:
+            sm = bet.sportsbook_market
+            opponent = sm.away_team if bet.yes_team == sm.home_team else sm.home_team
+            reason = f"sharp {bet.sharp_true_prob*100:.1f}% < min {config.AUTO_BET_MIN_SHARP*100:.0f}%"
+            record_skipped_bet(
+                ticker=bet.kalshi_market.ticker,
+                sport=bet.kalshi_market.sport_type,
+                side=bet.side,
+                team=bet.yes_team,
+                opponent=opponent,
+                price=bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask,
+                edge=bet.edge,
+                sharp_prob=bet.sharp_true_prob,
+                kalshi_prob=bet.kalshi_implied_prob,
+                game_time=bet.game_time,
+                reason=reason,
+            )
+            print(f"  [Auto-Bet] SKIP  {bet.side} · {bet.yes_team} — {reason}")
             continue
         ask = bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask
         if ask < config.AUTO_BET_MIN_PRICE:
@@ -598,9 +637,9 @@ def main() -> None:
     print(f"║  Min edge     : {config.MIN_EDGE * 100:.1f}%")
     print(f"║  Kelly mult   : {config.KELLY_FRACTION * 100:.0f}% (fractional)")
     if args.auto_bet:
-        print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)})")
+        print(f"║  Auto-bet     : ON  (edge {config.AUTO_BET_MIN_EDGE * 100:.1f}%–{config.AUTO_BET_MAX_EDGE * 100:.1f}%,  min sharp: {config.AUTO_BET_MIN_SHARP*100:.0f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)})")
     if args.auto_bet_loop_minutes is not None:
-        print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)},  interval: {args.auto_bet_loop_minutes}m)")
+        print(f"║  Auto-bet loop: ON  (edge {config.AUTO_BET_MIN_EDGE * 100:.1f}%–{config.AUTO_BET_MAX_EDGE * 100:.1f}%,  min sharp: {config.AUTO_BET_MIN_SHARP*100:.0f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)},  interval: {args.auto_bet_loop_minutes}m)")
     if config.CONTRARIAN_MODE:
         print(f"║  ⚠ FADE MODE  : ON  (all bets flipped to opposite side)")
 

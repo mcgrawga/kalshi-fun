@@ -71,10 +71,18 @@ KELLY_FRACTION: float = 0.25
 # Games already in the bet ledger are always skipped.
 AUTO_BET_MIN_EDGE: float = 0.02
 
+# Global sharp probability floor for auto-bets.
+# 0.60 = only take positions where sharp fair win probability is at least 60%.
+AUTO_BET_MIN_SHARP: float = 0.60
+
+# Global edge ceiling for auto-bets.
+# High-edge outliers have performed poorly historically; cap to avoid tails.
+AUTO_BET_MAX_EDGE: float = 0.05
+
 # Minimum contract price (ask) to auto-bet.  Cheap contracts (longshots or
 # games where the outcome is basically decided) have terrible historical ROI.
 # 0.40 = skip anything under 40¢.  Set to 0.0 to disable.
-AUTO_BET_MIN_PRICE: float = 0.20
+AUTO_BET_MIN_PRICE: float = 0.55
 
 # ─── Contrarian / Fade Mode ───────────────────────────────────────────────────
 # When True, every auto-bet is flipped to the opposite side. If the analyzer
