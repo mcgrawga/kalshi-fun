@@ -425,6 +425,25 @@ def _auto_bet(kalshi: KalshiClient, value_bets: list, already_bet_tickers: dict[
             continue
 
         print(f"  [Auto-Bet] Edge {bet.edge * 100:.1f}% · Kalshi {bet.kalshi_implied_prob * 100:.1f}% · Sharp {bet.sharp_true_prob * 100:.1f}% — qualifying bet:")
+
+        # ── Contrarian / Fade mode: flip to the opposite side ────────────
+        if config.CONTRARIAN_MODE:
+            original_side = bet.side
+            bet.side = "NO" if original_side == "YES" else "YES"
+            # Swap matched_team to the opponent (the other team now wins for us)
+            sm = bet.sportsbook_market
+            if bet.matched_team == sm.home_team:
+                bet.matched_team = sm.away_team
+            else:
+                bet.matched_team = sm.home_team
+            flipped_ask = bet.kalshi_market.yes_ask if bet.side == "YES" else bet.kalshi_market.no_ask
+            # Re-size contracts for the new price
+            if flipped_ask > 0:
+                bankroll_est = getattr(run_scan, "_last_bankroll", 0.0)
+                bet.contracts = max(1, round(bet.kelly_fraction * bankroll_est / flipped_ask))
+                bet.recommended_bet = round(bet.contracts * flipped_ask, 2)
+            print(f"  [FADE] Flipped {original_side} → {bet.side} · {bet.yes_team}")
+
         _place_bet(kalshi, bet)
         placed += 1
         # Mark this game as bet so we don't bet the other side in the same pass
@@ -582,6 +601,8 @@ def main() -> None:
         print(f"║  Auto-bet     : ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)})")
     if args.auto_bet_loop_minutes is not None:
         print(f"║  Auto-bet loop: ON  (edge ≥ {config.AUTO_BET_MIN_EDGE * 100:.1f}%,  min price: {config.AUTO_BET_MIN_PRICE*100:.0f}¢,  sport filters: {len(config.SPORT_STRATEGY)},  interval: {args.auto_bet_loop_minutes}m)")
+    if config.CONTRARIAN_MODE:
+        print(f"║  ⚠ FADE MODE  : ON  (all bets flipped to opposite side)")
 
     # ── Run-time cap setup ─────────────────────────────────────────────
     _CST = ZoneInfo("America/Chicago")

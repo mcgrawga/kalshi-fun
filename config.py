@@ -76,6 +76,13 @@ AUTO_BET_MIN_EDGE: float = 0.02
 # 0.40 = skip anything under 40¢.  Set to 0.0 to disable.
 AUTO_BET_MIN_PRICE: float = 0.20
 
+# ─── Contrarian / Fade Mode ───────────────────────────────────────────────────
+# When True, every auto-bet is flipped to the opposite side. If the analyzer
+# finds value on YES, the app buys NO instead (and vice versa). The strategy
+# filters (SPORT_STRATEGY) still apply to the *original* signal side — the
+# flip happens after all filters pass. Useful for fading the model's picks.
+CONTRARIAN_MODE: bool = False
+
 # ─── Per-Sport Strategy Filters ───────────────────────────────────────────────
 # Fine-grained auto-bet rules per sport. Each sport key maps to a dict with
 # optional filters.  A bet must pass ALL filters to be placed.  Sports not
